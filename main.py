@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from collections import deque
 import os
-import chardet
+import chardet # Make sure you have chardet installed: pip install chardet
 
 st.set_page_config(page_title="응급의료 이송 및 응급실 분석", layout="wide")
 
@@ -13,14 +13,39 @@ def safe_read_csv(path):
     if not os.path.exists(path):
         st.error(f"파일을 찾을 수 없습니다: {path}")
         return pd.DataFrame()
-    with open(path, 'rb') as f:
-        result = chardet.detect(f.read())
+    
     try:
-        df = pd.read_csv(path, encoding=result['encoding'], on_bad_lines='skip')
+        # Read a small chunk to detect encoding
+        with open(path, 'rb') as f:
+            raw_data = f.read(100000) # Read up to 100KB for detection
+            result = chardet.detect(raw_data)
+            detected_encoding = result['encoding']
+            
+            # Fallback to common Korean encodings if confidence is low or detection fails
+            if detected_encoding is None or result['confidence'] < 0.8:
+                possible_encodings = ['utf-8', 'euc-kr', 'cp949', 'utf-8-sig']
+            else:
+                possible_encodings = [detected_encoding, 'utf-8', 'euc-kr', 'cp949', 'utf-8-sig']
+            
+            df = None
+            for enc in possible_encodings:
+                try:
+                    df = pd.read_csv(path, encoding=enc, on_bad_lines='skip')
+                    st.info(f"'{path}' 파일을 '{enc}' 인코딩으로 성공적으로 로드했습니다.")
+                    return df
+                except UnicodeDecodeError:
+                    continue # Try next encoding
+                except Exception as e:
+                    st.error(f"'{path}' 파일을 여는 중 오류 발생: {e} (인코딩: {enc})")
+                    return pd.DataFrame() # Return empty if other error
+            
+            st.error(f"'{path}' 파일을 지원되는 어떤 인코딩으로도 로드할 수 없습니다.")
+            return pd.DataFrame()
+
     except Exception as e:
-        st.error(f"{path} 파일을 여는 중 오류 발생: {e}")
-        df = pd.DataFrame()
-    return df
+        st.error(f"{path} 파일을 여는 중 예기치 않은 오류 발생: {e}")
+        return pd.DataFrame()
+
 
 @st.cache_data
 def load_emergency_transport(path):
@@ -34,15 +59,11 @@ def load_monthly_er_usage(path):
 def load_time_er_usage(path):
     return safe_read_csv(path)
 
+# --- 파일 경로 정의 ---
+# 'data' 폴더가 project-root 안에 있고, 그 안에 CSV 파일들이 있다고 가정합니다.
 path_01 = "data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
 path_02 = "data/정보_02_월별+응급실+이용(시도별).csv"
 path_03 = "data/정보_03_내원시간별+응급실+이용(시도별).csv"
-
-@st.cache_data
-def load_emergency_transport(path):
-    return pd.read_csv(path, encoding='cp949')  # 파일 특성상 cp949 또는 utf-8-sig
-
-# 나머지도 동일하게 경로만 수정
 
 # 📦 데이터 로드
 transport_df = load_emergency_transport(path_01)
@@ -67,7 +88,7 @@ if not transport_df.empty:
         ax1.set_ylabel("시도")
         st.pyplot(fig1)
 else:
-    st.warning("이송 데이터가 비어있습니다.")
+    st.warning("이송 데이터가 비어있습니다. 파일 경로와 내용을 확인해주세요.")
 
 # 2️⃣ 월별 응급실 이용
 st.subheader("2️⃣ 월별 응급실 이용 현황")
@@ -82,7 +103,7 @@ if not monthly_df.empty and '월' in monthly_df.columns and '시도별' in month
     ax2.set_ylabel("이용 건수")
     st.pyplot(fig2)
 else:
-    st.warning("월별 이용 데이터가 비어있거나 컬럼이 누락되었습니다.")
+    st.warning("월별 이용 데이터가 비어있거나 필요한 컬럼이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
 
 # 3️⃣ 시간대별 응급실 이용
 st.subheader("3️⃣ 시간대별 응급실 이용 현황")
@@ -96,7 +117,7 @@ if not time_df.empty and '내원시간대' in time_df.columns and '시도별' in
     ax3.set_ylabel("이용 건수")
     st.pyplot(fig3)
 else:
-    st.warning("시간대별 이용 데이터가 비어있거나 컬럼이 누락되었습니다.")
+    st.warning("시간대별 이용 데이터가 비어있거나 필요한 컬럼이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
 
 # 4️⃣ 스택/큐 시뮬레이션
 st.subheader("🧠 응급 대기 순서 시뮬레이션 (스택/큐 모델)")
@@ -107,7 +128,14 @@ names = [name.strip() for name in patient_names.split(',') if name.strip()]
 if names:
     if mode == '큐 (선입선출)':
         q = deque(names)
-        st.write("처리 순서:", list(q))
+        st.write("🚶‍♀️ 큐 처리 순서:")
+        st.write(list(q))
     else:
         stack = list(reversed(names))
-        st.write("처리 순서:", stack)
+        st.write("🚶‍♂️ 스택 처리 순서:")
+        st.write(stack)
+else:
+    st.info("환자 이름을 입력하여 시뮬레이션을 시작해주세요.")
+
+st.markdown("---")
+st.caption("ⓒ 2025 긴급의료연구 프로젝트 by Streamlit")
