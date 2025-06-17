@@ -35,9 +35,9 @@ def load_time_er_usage(path):
     return safe_read_csv(path)
 
 # 📁 파일 경로 설정
-path_01 = "info_01.csv"
-path_02 = "info_02.csv"
-path_03 = "info_03.csv"
+path_01 = "정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
+path_02 = "정보_02_월별+응급실+이용(시도별).csv"
+path_03 = "정보_03_내원시간별+응급실+이용(시도별).csv"
 
 # 📦 데이터 로드
 transport_df = load_emergency_transport(path_01)
