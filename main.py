@@ -22,28 +22,40 @@ def safe_read_csv(path):
             detected_encoding = result['encoding']
             
             # Fallback to common Korean encodings if confidence is low or detection fails
+            # Added 'utf-8-sig' for BOM often found in Excel-exported CSVs
             if detected_encoding is None or result['confidence'] < 0.8:
                 possible_encodings = ['utf-8', 'euc-kr', 'cp949', 'utf-8-sig']
             else:
                 possible_encodings = [detected_encoding, 'utf-8', 'euc-kr', 'cp949', 'utf-8-sig']
             
+            # Common separators to try
+            possible_seps = [',', ';', '\t', '|'] # comma, semicolon, tab, pipe
+
             df = None
             for enc in possible_encodings:
-                try:
-                    df = pd.read_csv(path, encoding=enc, on_bad_lines='skip')
-                    st.info(f"'{path}' 파일을 '{enc}' 인코딩으로 성공적으로 로드했습니다.")
-                    return df
-                except UnicodeDecodeError:
-                    continue # Try next encoding
-                except Exception as e:
-                    st.error(f"'{path}' 파일을 여는 중 오류 발생: {e} (인코딩: {enc})")
-                    return pd.DataFrame() # Return empty if other error
+                for sep in possible_seps:
+                    try:
+                        # Try reading with different encodings and separators, using 'python' engine for robustness
+                        df = pd.read_csv(path, encoding=enc, sep=sep, on_bad_lines='skip', engine='python')
+                        # Check if the DataFrame has reasonable columns/data (e.g., more than 1 column)
+                        if not df.empty and len(df.columns) > 1:
+                            st.info(f"'{path}' 파일을 '{enc}' 인코딩, 구분자 '{sep}'로 성공적으로 로드했습니다.")
+                            return df
+                        else:
+                            # If it loaded but seems empty or only one column, it might be a wrong sep/enc combination
+                            continue
+                    except UnicodeDecodeError:
+                        continue # Try next encoding
+                    except Exception as e:
+                        # Catch other parsing errors, but keep trying different options
+                        # st.error(f"'{path}' 파일을 여는 중 오류 발생: {e} (인코딩: {enc}, 구분자: {sep})")
+                        continue # Keep trying other combinations
             
-            st.error(f"'{path}' 파일을 지원되는 어떤 인코딩으로도 로드할 수 없습니다.")
+            st.error(f"'{path}' 파일을 지원되는 어떤 인코딩/구분자로도 로드할 수 없습니다. 파일 내용을 직접 확인해주세요.")
             return pd.DataFrame()
 
     except Exception as e:
-        st.error(f"{path} 파일을 여는 중 예기치 않은 오류 발생: {e}")
+        st.error(f"'{path}' 파일을 여는 중 예기치 않은 오류 발생: {e}")
         return pd.DataFrame()
 
 
@@ -60,7 +72,6 @@ def load_time_er_usage(path):
     return safe_read_csv(path)
 
 # --- 파일 경로 정의 ---
-# 'data' 폴더가 project-root 안에 있고, 그 안에 CSV 파일들이 있다고 가정합니다.
 path_01 = "data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
 path_02 = "data/정보_02_월별+응급실+이용(시도별).csv"
 path_03 = "data/정보_03_내원시간별+응급실+이용(시도별).csv"
@@ -87,6 +98,8 @@ if not transport_df.empty:
         ax1.set_xlabel("건수")
         ax1.set_ylabel("시도")
         st.pyplot(fig1)
+    else:
+        st.warning("이송 데이터에 '시도명' 컬럼이 없습니다. 데이터 내용을 확인해주세요.")
 else:
     st.warning("이송 데이터가 비어있습니다. 파일 경로와 내용을 확인해주세요.")
 
@@ -103,7 +116,7 @@ if not monthly_df.empty and '월' in monthly_df.columns and '시도별' in month
     ax2.set_ylabel("이용 건수")
     st.pyplot(fig2)
 else:
-    st.warning("월별 이용 데이터가 비어있거나 필요한 컬럼이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
+    st.warning("월별 이용 데이터가 비어있거나 필요한 컬럼('월', '시도별')이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
 
 # 3️⃣ 시간대별 응급실 이용
 st.subheader("3️⃣ 시간대별 응급실 이용 현황")
@@ -117,7 +130,7 @@ if not time_df.empty and '내원시간대' in time_df.columns and '시도별' in
     ax3.set_ylabel("이용 건수")
     st.pyplot(fig3)
 else:
-    st.warning("시간대별 이용 데이터가 비어있거나 필요한 컬럼이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
+    st.warning("시간대별 이용 데이터가 비어있거나 필요한 컬럼('내원시간대', '시도별')이 누락되었습니다. 파일 경로와 내용을 확인해주세요.")
 
 # 4️⃣ 스택/큐 시뮬레이션
 st.subheader("🧠 응급 대기 순서 시뮬레이션 (스택/큐 모델)")
