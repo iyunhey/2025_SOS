@@ -8,21 +8,20 @@ st.set_page_config(page_title="응급의료 이송 및 응급실 분석", layout
 
 @st.cache_data
 def load_emergency_transport(path):
-    # 파일 경로를 상대 경로로 변경했습니다.
-    # 만약 파일이 'data' 폴더 안에 있다면 'data/info_01.csv' 등으로 수정해야 합니다.
-    df = pd.read_csv(path, encoding='cp949')
+    # UnicodeDecodeError 해결을 위해 인코딩을 'utf-8'로 변경했습니다.
+    df = pd.read_csv(path, encoding='utf-8')
     return df
 
 @st.cache_data
 def load_monthly_er_usage(path):
-    # 파일 경로를 상대 경로로 변경했습니다.
-    df = pd.read_csv(path, encoding='cp949')
+    # UnicodeDecodeError 해결을 위해 인코딩을 'utf-8'로 변경했습니다.
+    df = pd.read_csv(path, encoding='utf-8')
     return df
 
 @st.cache_data
 def load_time_er_usage(path):
-    # 파일 경로를 상대 경로로 변경했습니다.
-    df = pd.read_csv(path, encoding='cp949')
+    # UnicodeDecodeError 해결을 위해 인코딩을 'utf-8'로 변경했습니다.
+    df = pd.read_csv(path, encoding='utf-8')
     return df
 
 st.title("🚑 응급의료 이송 및 응급실 이용 분석")
@@ -87,16 +86,3 @@ mode = st.radio("대기 방식 선택", ['큐 (선입선출)', '스택 (후입�
 patient_names = st.text_input("환자 이름 (쉼표로 구분)", "환자1,환자2,환자3")
 
 names = [name.strip() for name in patient_names.split(',') if name.strip()]
-
-if st.button("대기 순서 시뮬레이션"):
-    if mode == '큐 (선입선출)':
-        queue = deque(names)
-        st.write("🚶‍♀️ 큐 순서:")
-        st.write(list(queue))
-    else:
-        stack = list(names)
-        st.write("🚶‍♂️ 스택 순서:")
-        st.write(list(reversed(stack)))
-
-st.markdown("---")
-st.caption("ⓒ 2025 긴급의료연구 프로젝트 by Streamlit")
