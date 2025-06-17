@@ -8,16 +8,20 @@ st.set_page_config(page_title="응급의료 이송 및 응급실 분석", layout
 
 @st.cache_data
 def load_emergency_transport(path):
+    # 파일 경로를 상대 경로로 변경했습니다.
+    # 만약 파일이 'data' 폴더 안에 있다면 'data/info_01.csv' 등으로 수정해야 합니다.
     df = pd.read_csv(path, encoding='cp949')
     return df
 
 @st.cache_data
 def load_monthly_er_usage(path):
+    # 파일 경로를 상대 경로로 변경했습니다.
     df = pd.read_csv(path, encoding='cp949')
     return df
 
 @st.cache_data
 def load_time_er_usage(path):
+    # 파일 경로를 상대 경로로 변경했습니다.
     df = pd.read_csv(path, encoding='cp949')
     return df
 
@@ -25,9 +29,16 @@ st.title("🚑 응급의료 이송 및 응급실 이용 분석")
 st.markdown("#### 📊 응급환자 이송 현황, 월별 및 시간대별 응급실 이용 패턴을 분석하고 시각화합니다.")
 
 # 데이터 로드
-transport_df = load_emergency_transport('/mnt/data/info_01.csv')
-monthly_df = load_monthly_er_usage('/mnt/data/info_02.csv')
-time_df = load_time_er_usage('/mnt/data/info_03.csv')
+# 파일이 main.py와 같은 디렉토리에 있을 경우
+transport_df = load_emergency_transport('info_01.csv')
+monthly_df = load_monthly_er_usage('info_02.csv')
+time_df = load_time_er_usage('info_03.csv')
+
+# 만약 파일이 'data'라는 하위 폴더에 있다면 아래처럼 수정하세요:
+# transport_df = load_emergency_transport('data/info_01.csv')
+# monthly_df = load_monthly_er_usage('data/info_02.csv')
+# time_df = load_time_er_usage('data/info_03.csv')
+
 
 st.subheader("1️⃣ 응급환자 이송 현황 분석")
 st.dataframe(transport_df.head())
