@@ -34,10 +34,15 @@ def load_monthly_er_usage(path):
 def load_time_er_usage(path):
     return safe_read_csv(path)
 
-# 📁 절대 경로 기반 파일 경로 설정 (Streamlit 실행 경로 기준)
-path_01 = "/mnt/data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
-path_02 = "/mnt/data/정보_02_월별+응급실+이용(시도별).csv"
-path_03 = "/mnt/data/정보_03_내원시간별+응급실+이용(시도별).csv"
+path_01 = "data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
+path_02 = "data/정보_02_월별+응급실+이용(시도별).csv"
+path_03 = "data/정보_03_내원시간별+응급실+이용(시도별).csv"
+
+@st.cache_data
+def load_emergency_transport(path):
+    return pd.read_csv(path, encoding='cp949')  # 파일 특성상 cp949 또는 utf-8-sig
+
+# 나머지도 동일하게 경로만 수정
 
 # 📦 데이터 로드
 transport_df = load_emergency_transport(path_01)
