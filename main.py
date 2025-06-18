@@ -143,20 +143,22 @@ transport_df = load_transport_data(transport_path)
 # --- ✨ transport_df 전처리: '시도명' 컬럼 생성 ✨ ---
 # '소재지전체주소' 컬럼에서 '시도명' 추출
 if not transport_df.empty and '소재지전체주소' in transport_df.columns:
+    # 1차 추출: 주소에서 첫 단어 추출
     transport_df['시도명'] = transport_df['소재지전체주소'].apply(
         lambda x: str(x).split(' ')[0] if pd.notna(x) and ' ' in str(x) else None
     )
-    # "세종특별자치시"와 같이 공백 없이 시도명인 경우를 처리
-    transport_df['시도명'] = transport_df['시도명'].apply(
-        lambda x: '세종특별자치시' if x and '세종' in x else x
-    )
-    # '서울특별시' 등 5글자 이상 시도명 중 '특별시'나 '광역시', '자치시'를 포함하는 경우도 처리 가능 (필요시 추가)
-    # 예: '제주특별자치도'
-    transport_df['시도명'] = transport_df['시도명'].apply(
-        lambda x: x if x and len(x) <= 4 or '특별' in x or '광역' in x or '자치' in x else None # 기본적인 시도명 필터링
-    )
 
-    st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성했습니다.")
+    # 2차 보정: 정확한 시도명으로 필터링 및 보정 (None 값에 대한 체크 추가)
+    transport_df['시도명'] = transport_df['시도명'].apply(
+        lambda x: x if isinstance(x, str) and (len(x) <= 4 or '특별' in x or '광역' in x or '자치' in x) else None
+    )
+    # 세종특별자치시와 같이 단일 단어이지만 긴 경우를 위해 추가 보정 (이전 로직에서는 '세종'만 남을 수 있었음)
+    transport_df['시도명'] = transport_df['시도명'].replace('세종', '세종특별자치시') # 직접 보정
+
+    # NaN 값 제거 또는 특정 값으로 채우기 (그래프 오류 방지)
+    transport_df.dropna(subset=['시도명'], inplace=True) # 시도명이 없는 행은 제거
+    
+    st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
 elif not transport_df.empty: # 소재지전체주소 컬럼이 없는 경우
     st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뜁니다.")
 # --- ✨ 전처리 끝 ✨ ---
@@ -195,10 +197,11 @@ if not transport_df.empty:
     if '시도명' in transport_df.columns and transport_df['시도명'].notna().any(): 
         fig1, ax1 = plt.subplots(figsize=(10, 5))
         # '시도명' 컬럼으로 그룹화
-        transport_df.groupby('시도명').size().sort_values().plot(kind='barh', ax=ax1, color='skyblue') 
+        transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') # 내림차순 정렬
         ax1.set_title("시도별 이송 건수")
         ax1.set_xlabel("건수")
         ax1.set_ylabel("시도")
+        plt.tight_layout() # 레이아웃 자동 조정
         st.pyplot(fig1)
     else:
         st.warning("이송 데이터에 '시도명' 컬럼이 없거나 유효한 시도명 값이 없습니다. 데이터 내용을 확인해주세요.")
