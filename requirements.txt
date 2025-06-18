@@ -4,3 +4,4 @@ matplotlib
 seaborn
 chardet
 osmnx
+geopy
