@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 from collections import deque
-import os # 파일 존재 여부 확인을 위해 추가
-import chardet # 인코딩 감지를 위해 추가
+import os
+import chardet
 
 st.set_page_config(page_title="응급의료 이송 및 분석 대시보드", layout="wide")
 st.title("🚑 응급환자 이송 및 응급실 이용 분석")
@@ -29,54 +29,32 @@ def load_transport_data(path):
         return pd.DataFrame()
     
     try:
-        # Notepad++에서 EUC-KR로 확인되었으므로, EUC-KR을 먼저 시도합니다.
-        # on_bad_lines='skip'과 engine='python'은 파싱 오류에 대비하여 유지합니다.
-        df = pd.read_csv(path, encoding='euc-kr', on_bad_lines='skip', engine='python')
+        # 'euc-kr' 오류가 났으므로, 이번에는 'cp949'를 가장 먼저 시도합니다.
+        # 'cp949'는 'euc-kr'의 확장판으로 더 많은 문자를 포함합니다.
+        for enc in ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig']: # 시도 순서 변경
+            for sep in [',', ';', '\t', '|']:
+                try:
+                    df = pd.read_csv(path, encoding=enc, sep=sep, on_bad_lines='skip', engine='python')
+                    
+                    if not df.empty and len(df.columns) > 1:
+                        st.info(f"'{path}' 파일을 '{enc}' 인코딩, 구분자 '{sep}'로 성공적으로 로드했습니다.")
+                        return df
+                    else:
+                        continue # 빈 DataFrame이거나 컬럼이 하나면 잘못 로드된 것으로 간주
+                except (UnicodeDecodeError, pd.errors.ParserError) as e:
+                    # 인코딩 오류 또는 파싱 오류 발생 시 다음 조합 시도
+                    # st.warning(f"'{path}' 로드 실패 (인코딩: {enc}, 구분자: {sep}): {e}") # 디버깅용
+                    continue
+                except Exception as e:
+                    # 예상치 못한 다른 오류 발생 시
+                    st.error(f"'{path}' 파일을 여는 중 예상치 못한 오류 발생 (인코딩: {enc}, 구분자: {sep}): {e}")
+                    continue
         
-        # DataFrame이 비어있지 않고, 컬럼 수가 1개보다 많으면 성공으로 간주
-        if not df.empty and len(df.columns) > 1:
-            st.info(f"'{path}' 파일을 'euc-kr' 인코딩으로 성공적으로 로드했습니다.")
-            return df
-        else:
-            # EUC-KR로 로드했으나 여전히 문제가 있다면, 범용적인 시도 로직으로 대체
-            st.warning(f"'{path}' 파일을 'euc-kr'로 로드했으나 데이터가 불완전합니다. 다른 인코딩을 시도합니다.")
-            
-            # --- 이전 safe_read_csv의 범용 로직 재활용 ---
-            # chardet 감지 (혹시 모를 상황 대비)
-            with open(path, 'rb') as f:
-                raw_data = f.read(100000)
-                result = chardet.detect(raw_data)
-                detected_encoding = result['encoding']
-                
-            possible_encodings = []
-            # EUC-KR을 시도했으니, 이제 다른 주요 인코딩을 시도 목록에 추가
-            if detected_encoding and result['confidence'] > 0.7:
-                possible_encodings.append(detected_encoding)
-            possible_encodings.extend(['utf-8', 'cp949', 'utf-8-sig']) # euc-kr은 이미 시도했으니 제외
-            possible_encodings = list(dict.fromkeys(possible_encodings)) # 중복 제거
-
-            possible_seps = [',', ';', '\t', '|']
-
-            for enc in possible_encodings:
-                for sep in possible_seps:
-                    try:
-                        df = pd.read_csv(path, encoding=enc, sep=sep, on_bad_lines='skip', engine='python')
-                        if not df.empty and len(df.columns) > 1:
-                            st.info(f"'{path}' 파일을 '{enc}' 인코딩, 구분자 '{sep}'로 성공적으로 로드했습니다.")
-                            return df
-                        else:
-                            continue
-                    except (UnicodeDecodeError, pd.errors.ParserError):
-                        continue
-                    except Exception as e:
-                        st.error(f"'{path}' 파일을 여는 중 예상치 못한 오류 발생 (인코딩: {enc}, 구분자: {sep}): {e}")
-                        continue
-            # --- 범용 로직 끝 ---
-            
-            st.error(f"'{path}' 파일을 지원되는 어떤 인코딩/구분자로도 로드할 수 없습니다. 파일 내용을 직접 확인해주세요.")
-            return pd.DataFrame()
+        st.error(f"'{path}' 파일을 지원되는 어떤 인코딩/구분자로도 로드할 수 없습니다. 파일 내용을 직접 확인해주세요.")
+        return pd.DataFrame()
 
     except Exception as e:
+        # 이 최상위 except는 파일 오픈 자체의 문제 등 포괄적인 오류를 잡습니다.
         st.error(f"'{path}' 파일을 로드하는 중 최상위 오류 발생: {e}")
         return pd.DataFrame()
 
@@ -172,7 +150,7 @@ else:
 st.subheader("1️⃣ 응급환자 이송 현황 분석")
 if not transport_df.empty:
     st.dataframe(transport_df.head())
-    if '시도명' in transport_df.columns: # '시도명' 컬럼이 있는지 다시 확인
+    if '시도명' in transport_df.columns:
         fig1, ax1 = plt.subplots(figsize=(10, 5))
         transport_df.groupby('시도명').size().sort_values().plot(kind='barh', ax=ax1, color='skyblue')
         ax1.set_title("시도별 이송 건수")
