@@ -137,32 +137,64 @@ def load_month_data(path):
 
 # -------------------------------
 # 데이터 로드 및 전처리
-# -------------------------------
 transport_df = load_transport_data(transport_path)
 
-# --- ✨ transport_df 전처리: '시도명' 컬럼 생성 ✨ ---
-# '소재지전체주소' 컬럼에서 '시도명' 추출
+# --- ✨ transport_df 전처리: '시도명' 컬럼 생성 및 보정 ✨ ---
 if not transport_df.empty and '소재지전체주소' in transport_df.columns:
-    # 1차 추출: 주소에서 첫 단어 추출
-    transport_df['시도명'] = transport_df['소재지전체주소'].apply(
-        lambda x: str(x).split(' ')[0] if pd.notna(x) and ' ' in str(x) else None
-    )
+    def extract_sido(address):
+        if pd.isna(address):
+            return None
+        
+        addr_str = str(address).strip() # 앞뒤 공백 제거
+        if not addr_str: # 빈 문자열인 경우
+            return None
 
-    # 2차 보정: 정확한 시도명으로 필터링 및 보정 (None 값에 대한 체크 추가)
-    transport_df['시도명'] = transport_df['시도명'].apply(
-        lambda x: x if isinstance(x, str) and (len(x) <= 4 or '특별' in x or '광역' in x or '자치' in x) else None
-    )
-    # 세종특별자치시와 같이 단일 단어이지만 긴 경우를 위해 추가 보정 (이전 로직에서는 '세종'만 남을 수 있었음)
-    transport_df['시도명'] = transport_df['시도명'].replace('세종', '세종특별자치시') # 직접 보정
+        parts = addr_str.split(' ')
+        if not parts: # 공백으로 나눴을 때 빈 리스트인 경우
+            return None
 
-    # NaN 값 제거 또는 특정 값으로 채우기 (그래프 오류 방지)
-    transport_df.dropna(subset=['시도명'], inplace=True) # 시도명이 없는 행은 제거
+        first_part = parts[0]
+
+        # 세종특별자치시와 같이 단일 단어이지만 긴 경우를 먼저 처리
+        if '세종' in first_part:
+            return '세종특별자치시'
+        
+        # 일반적인 시/도명 패턴 (2~4글자)
+        if len(first_part) <= 4:
+            # "서울", "경기", "인천" 등
+            # 여기에 시도 목록을 명시적으로 넣어 더 정확하게 필터링할 수도 있습니다.
+            korean_sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
+                                 "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도",
+                                 "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도",
+                                 "제주특별자치도"]
+            
+            # 주소의 첫 부분이 실제 시도명 목록에 포함되는지 확인
+            for sido in korean_sido_list:
+                if first_part in sido: # 예: '서울' in '서울특별시'
+                    return sido # 정확한 시도명을 반환
+
+        # 특별시, 광역시, 자치시/도 포함하는 경우 처리
+        # '서울특별시', '부산광역시', '강원특별자치도', '제주특별자치도' 등
+        for part in parts:
+            if '특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part:
+                # '강원특별자치도'처럼 두 단어일 경우를 위해 조정
+                if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part:
+                    return f"{parts[0]}{part}" # '강원' + '특별자치도'
+                return part # '서울특별시', '부산광역시' 등
+
+        return None # 어떤 조건에도 해당하지 않으면 None 반환
+
+
+    transport_df['시도명'] = transport_df['소재지전체주소'].apply(extract_sido)
+
+    # 시도명 컬럼에 유효하지 않은 (None) 값이 남아있을 경우 제거
+    # 혹은 '기타' 등으로 채울 수도 있습니다: transport_df['시도명'].fillna('기타', inplace=True)
+    transport_df.dropna(subset=['시도명'], inplace=True)
     
     st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
 elif not transport_df.empty: # 소재지전체주소 컬럼이 없는 경우
-    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뜁니다.")
+    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너킵니다.")
 # --- ✨ 전처리 끝 ✨ ---
-
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
 
