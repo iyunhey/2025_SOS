@@ -310,15 +310,23 @@ else:
 # 4️⃣ 도로망 그래프 정보 (osmnx로 변경)
 # -------------------------------
 st.subheader("🛣️ 도로망 그래프 정보")
+# road_graph 변수를 로드하는 곳 바로 밑에 place_name 변수를 정의해두면 안전합니다.
+# 예를 들어:
+place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea" # 이 변수와 일치시켜야 합니다.
+road_graph = load_road_network_from_osmnx(place_for_osmnx)
+
 if road_graph:
-    st.write(f"**로드된 도로망 그래프 (`{road_graph.graph['place']}`):**")
+    # 수정 전: st.write(f"**로드된 도로망 그래프 (`{road_graph.graph['place']}`):**")
+    # 수정 후: load_road_network_from_osmnx 함수에 전달했던 place_for_osmnx 변수를 직접 사용합니다.
+    st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**") # ✨ 이 부분을 수정합니다. ✨
     st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
     st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
     
-    # 맵 위에 그래프 시각화 (간단한 예시)
     st.write("간단한 도로망 지도 시각화 (노드와 간선):")
+    # osmnx 버전 1.2.0 이후부터는 `close` 파라미터가 제거되었습니다.
+    # 안전하게 `show=False`만 사용하거나, `ax` 객체를 직접 반환받아 Streamlit에 전달합니다.
     fig, ax = ox.plot_graph(road_graph, show=False, close=False, bgcolor='white', node_color='red', node_size=5, edge_color='gray', edge_linewidth=0.5)
-    st.pyplot(fig) # Streamlit에 Matplotlib 그림 표시
+    st.pyplot(fig) 
     st.caption("참고: 전체 도로망은 복잡하여 로딩이 느릴 수 있습니다.")
 
 else:
