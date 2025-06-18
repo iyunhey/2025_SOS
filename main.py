@@ -7,12 +7,12 @@ from collections import deque
 import os
 import chardet
 
+# 공간 데이터 및 그래프 처리를 위한 라이브러리 추가
+import geopandas as gpd
+import networkx as nx
+from shapely.geometry import Point, LineString # 지오메트리 객체 사용을 위해 추가
+
 # Matplotlib 한글 폰트 설정
-# Streamlit Cloud 환경에서는 폰트 설치가 필요할 수 있습니다.
-# 예를 들어, .streamlit/config.toml 파일에 다음과 같이 추가 (Streamlit Cloud에서)
-# [theme]
-# fontFamily = "Malgun Gothic"
-# (로컬 환경의 경우)
 plt.rcParams['font.family'] = 'Malgun Gothic' # Windows 사용자
 # plt.rcParams['font.family'] = 'AppleGothic' # macOS 사용자
 plt.rcParams['axes.unicode_minus'] = False # 마이너스 폰트 깨짐 방지
@@ -26,12 +26,14 @@ st.title("🚑 응급환자 이송 및 응급실 이용 분석")
 transport_path = "data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
 time_json_path = "data/정보_SOS_03.json"
 month_json_path = "data/정보_SOS_02.json"
+# 🛣️ 도로망 SHP 파일 경로 추가 (실제 파일명으로 변경하세요)
+road_network_path = "data/TL_SPCL_ROAD_2023.shp" # 예시 파일명, 실제 파일명으로 변경 필요
 
 # -------------------------------
 # 데이터 로딩 함수
 # -------------------------------
 
-# CSV 파일을 안전하게 로드하는 함수
+# ... (기존 load_transport_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_transport_data(path):
     if not os.path.exists(path):
@@ -39,10 +41,6 @@ def load_transport_data(path):
         return pd.DataFrame()
     
     try:
-        # Notepad++에서 EUC-KR로 확인되었으나, 'euc-kr' decode 오류가 발생했으므로
-        # 'cp949'를 가장 먼저 시도하고 그 다음 'euc-kr'을 시도합니다.
-        # 'cp949'는 'euc-kr'의 확장판으로 더 많은 문자를 포함합니다.
-        # 이후 utf-8 및 utf-8-sig도 시도합니다.
         possible_encodings = ['cp949', 'euc-kr', 'utf-8', 'utf-8-sig'] 
         possible_seps = [',', ';', '\t', '|']
 
@@ -51,18 +49,14 @@ def load_transport_data(path):
             for sep in possible_seps:
                 try:
                     df = pd.read_csv(path, encoding=enc, sep=sep, on_bad_lines='skip', engine='python')
-                    
                     if not df.empty and len(df.columns) > 1:
                         st.info(f"'{path}' 파일을 '{enc}' 인코딩, 구분자 '{sep}'로 성공적으로 로드했습니다.")
                         return df
                     else:
-                        continue # 빈 DataFrame이거나 컬럼이 하나면 잘못 로드된 것으로 간주
+                        continue 
                 except (UnicodeDecodeError, pd.errors.ParserError) as e:
-                    # 인코딩 오류 또는 파싱 오류 발생 시 다음 조합 시도
-                    # st.warning(f"'{path}' 로드 실패 (인코딩: {enc}, 구분자: {sep}): {e}") # 디버깅용
                     continue
                 except Exception as e:
-                    # 예상치 못한 다른 오류 발생 시
                     st.error(f"'{path}' 파일을 여는 중 예상치 못한 오류 발생 (인코딩: {enc}, 구분자: {sep}): {e}")
                     continue
         
@@ -73,7 +67,7 @@ def load_transport_data(path):
         st.error(f"'{path}' 파일을 로드하는 중 최상위 오류 발생: {e}")
         return pd.DataFrame()
 
-
+# ... (기존 load_time_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_time_data(path):
     try:
@@ -104,6 +98,7 @@ def load_time_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
+# ... (기존 load_month_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_month_data(path):
     try:
@@ -135,8 +130,58 @@ def load_month_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
+# 🛣️ 도로망 SHP 파일을 로드하고 networkx 그래프로 변환하는 함수
+@st.cache_data
+def load_road_network(path):
+    if not os.path.exists(path):
+        st.error(f"도로망 SHP 파일을 찾을 수 없습니다: {path}")
+        st.warning("SHP 파일은 `.shp`, `.shx`, `.dbf`, `.prj` 등 여러 파일로 구성되어 있으며, 모두 'data/' 폴더에 함께 있어야 합니다.")
+        return None
+
+    try:
+        # GeoDataFrame으로 SHP 파일 로드
+        gdf = gpd.read_file(path)
+        st.info(f"'{path}' 도로망 SHP 파일을 성공적으로 로드했습니다. 현재 CRS: {gdf.crs}")
+
+        # 모든 데이터를 위도/경도(EPSG:4326)로 통일
+        if gdf.crs != 'EPSG:4326':
+            gdf = gdf.to_crs(epsg=4326)
+            st.info("도로망 좌표계를 EPSG:4326 (위도/경도)으로 변환했습니다.")
+        
+        # NetworkX 그래프 객체 생성
+        G = nx.Graph() # 무방향 그래프 (도로는 양방향 통행 가능하다고 가정)
+                       # 만약 일방통행 정보가 있다면 nx.DiGraph() 사용 고려
+
+        # 각 도로 세그먼트(LineString)를 그래프의 간선으로 추가
+        # 노드는 LineString의 시작점과 끝점이 됩니다.
+        for idx, row in gdf.iterrows():
+            if row.geometry and row.geometry.geom_type == 'LineString':
+                line = row.geometry
+                # 각 세그먼트의 시작점과 끝점 좌표를 노드로 사용
+                start_node_coords = (line.coords[0][0], line.coords[0][1]) # (경도, 위도)
+                end_node_coords = (line.coords[-1][0], line.coords[-1][1]) # (경도, 위도)
+                
+                # 노드 추가 (노드 이름은 좌표 튜플)
+                G.add_node(start_node_coords, pos=start_node_coords)
+                G.add_node(end_node_coords, pos=end_node_coords)
+                
+                # 간선 추가. 가중치는 도로 길이(도 단위)로 설정
+                # 실제 경로 탐색 시에는 미터/킬로미터 단위로 변환 필요
+                # 여기서는 단순히 길이만 사용하지만, 나중에 교통량/기상으로 보정
+                length = line.length # 지리 좌표계에서 길이는 도(degree) 단위
+                G.add_edge(start_node_coords, end_node_coords, weight=length)
+        
+        st.success(f"도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
+        return G
+
+    except Exception as e:
+        st.error(f"도로망 SHP 파일을 로드하고 그래프로 변환하는 중 오류 발생: {e}")
+        st.warning("`geopandas` 및 `networkx` 라이브러리가 올바르게 설치되었는지 확인하고, SHP 파일이 손상되지 않았는지 확인해주세요.")
+        return None
+
 # -------------------------------
 # 데이터 로드 및 전처리
+# -------------------------------
 transport_df = load_transport_data(transport_path)
 
 # --- ✨ transport_df 전처리: '시도명' 컬럼 생성 및 보정 ✨ ---
@@ -145,58 +190,54 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
         if pd.isna(address):
             return None
         
-        addr_str = str(address).strip() # 앞뒤 공백 제거
-        if not addr_str: # 빈 문자열인 경우
+        addr_str = str(address).strip() 
+        if not addr_str: 
             return None
 
         parts = addr_str.split(' ')
-        if not parts: # 공백으로 나눴을 때 빈 리스트인 경우
+        if not parts: 
             return None
 
         first_part = parts[0]
 
-        # 세종특별자치시와 같이 단일 단어이지만 긴 경우를 먼저 처리
         if '세종' in first_part:
             return '세종특별자치시'
         
-        # 일반적인 시/도명 패턴 (2~4글자)
-        if len(first_part) <= 4:
-            # "서울", "경기", "인천" 등
-            # 여기에 시도 목록을 명시적으로 넣어 더 정확하게 필터링할 수도 있습니다.
-            korean_sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
+        korean_sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
                                  "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도",
                                  "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도",
                                  "제주특별자치도"]
             
-            # 주소의 첫 부분이 실제 시도명 목록에 포함되는지 확인
-            for sido in korean_sido_list:
-                if first_part in sido: # 예: '서울' in '서울특별시'
-                    return sido # 정확한 시도명을 반환
-
-        # 특별시, 광역시, 자치시/도 포함하는 경우 처리
-        # '서울특별시', '부산광역시', '강원특별자치도', '제주특별자치도' 등
+        for sido in korean_sido_list:
+            if first_part in sido: 
+                return sido 
+        
         for part in parts:
-            if '특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part:
-                # '강원특별자치도'처럼 두 단어일 경우를 위해 조정
-                if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part:
-                    return f"{parts[0]}{part}" # '강원' + '특별자치도'
-                return part # '서울특별시', '부산광역시' 등
+            if isinstance(part, str) and ('특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part):
+                if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part or '제주' in part:
+                    # 복합 시도명 처리 (예: 강원특별자치도, 제주특별자치도)
+                    if len(parts) > 1: # 두 단어 이상인 경우 첫 부분 + 두 번째 부분 결합
+                        return f"{parts[0]}{part}"
+                    else: # 이미 전체 이름인 경우
+                        return part
+                return part # 서울특별시, 부산광역시 등 (한 단어인 경우)
 
-        return None # 어떤 조건에도 해당하지 않으면 None 반환
+        return None 
 
 
     transport_df['시도명'] = transport_df['소재지전체주소'].apply(extract_sido)
 
-    # 시도명 컬럼에 유효하지 않은 (None) 값이 남아있을 경우 제거
-    # 혹은 '기타' 등으로 채울 수도 있습니다: transport_df['시도명'].fillna('기타', inplace=True)
     transport_df.dropna(subset=['시도명'], inplace=True)
     
     st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
-elif not transport_df.empty: # 소재지전체주소 컬럼이 없는 경우
+elif not transport_df.empty:
     st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너킵니다.")
 # --- ✨ 전처리 끝 ✨ ---
+
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
+# 🛣️ 도로망 그래프 로드 (새로 추가된 부분)
+road_graph = load_road_network(road_network_path)
 
 
 # -------------------------------
@@ -214,7 +255,6 @@ else:
     st.sidebar.warning("시간대별 또는 월별 데이터가 로드되지 않았습니다.")
     region = None
 
-
 # -------------------------------
 # 1️⃣ 응급환자 이송 현황
 # -------------------------------
@@ -224,16 +264,13 @@ if not transport_df.empty:
     if st.checkbox("📌 이송 데이터 요약 통계 보기"):
         st.write(transport_df.describe(include='all'))
     
-    # '시도명' 컬럼이 이제 전처리 과정에서 생성되었으므로, 이 조건문은 그대로 유지
-    # 시도명 컬럼이 있고, 유효한 값이 있을 때만 그래프를 그립니다.
     if '시도명' in transport_df.columns and transport_df['시도명'].notna().any(): 
         fig1, ax1 = plt.subplots(figsize=(10, 5))
-        # '시도명' 컬럼으로 그룹화
-        transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') # 내림차순 정렬
+        transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') 
         ax1.set_title("시도별 이송 건수")
         ax1.set_xlabel("건수")
         ax1.set_ylabel("시도")
-        plt.tight_layout() # 레이아웃 자동 조정
+        plt.tight_layout() 
         st.pyplot(fig1)
     else:
         st.warning("이송 데이터에 '시도명' 컬럼이 없거나 유효한 시도명 값이 없습니다. 데이터 내용을 확인해주세요.")
@@ -245,7 +282,6 @@ else:
 # -------------------------------
 st.subheader("2️⃣ 시간대별 응급실 이용 현황 (2023)")
 if not time_df.empty and region:
-    # time_df에서 해당 지역의 데이터 행 선택
     time_row = time_df[time_df['시도'] == region].iloc[0, 1:]
     
     fig2, ax2 = plt.subplots()
@@ -262,7 +298,6 @@ else:
 # -------------------------------
 st.subheader("3️⃣ 월별 응급실 이용 현황 (2023)")
 if not month_df.empty and region:
-    # month_df에서 해당 지역의 데이터 행 선택
     month_row = month_df[month_df['시도'] == region].iloc[0, 1:]
     
     fig3, ax3 = plt.subplots()
@@ -275,9 +310,21 @@ else:
     st.warning("월별 데이터 로드에 문제가 있거나 지역이 선택되지 않았습니다.")
 
 # -------------------------------
-# 4️⃣ 우선순위 큐 시뮬레이션
+# 4️⃣ 도로망 그래프 정보 (새로 추가된 섹션)
 # -------------------------------
-st.subheader("4️⃣ 응급 대기 시뮬레이션 (스택/큐 모델)")
+st.subheader("🛣️ 도로망 그래프 정보")
+if road_graph:
+    st.write(f"**로드된 도로망 그래프:**")
+    st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
+    st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
+    # 그래프 시각화는 나중에 지도 위에 렌더링 섹션에서 더 상세히 다룰 예정
+else:
+    st.warning("도로망 그래프 로드에 실패했습니다. SHP 파일 경로와 파일 유무를 확인해주세요.")
+
+# -------------------------------
+# 5️⃣ 우선순위 큐 시뮬레이션
+# -------------------------------
+st.subheader("5️⃣ 응급 대기 시뮬레이션 (스택/큐 모델)")
 mode = st.radio("대기 방식 선택", ['큐 (선입선출)', '스택 (후입선출)'])
 patient_input = st.text_input("환자 이름 (쉼표로 구분)", "홍길동,김영희,이철수")
 patients = [p.strip() for p in patient_input.split(',') if p.strip()]
