@@ -7,10 +7,11 @@ from collections import deque
 import os
 import chardet
 
-# 공간 데이터 및 그래프 처리를 위한 라이브러리 추가
-import geopandas as gpd
+# 공간 데이터 및 그래프 처리를 위한 라이브러리 추가 (geopandas 대신 osmnx 사용)
+# import geopandas as gpd # geopandas는 더 이상 직접 사용하지 않습니다.
 import networkx as nx
-from shapely.geometry import Point, LineString # 지오메트리 객체 사용을 위해 추가
+# from shapely.geometry import Point, LineString # shapely도 osmnx 내부에서 처리됩니다.
+import osmnx as ox # ✨ osmnx 라이브러리 추가 ✨
 
 # Matplotlib 한글 폰트 설정
 plt.rcParams['font.family'] = 'Malgun Gothic' # Windows 사용자
@@ -26,14 +27,13 @@ st.title("🚑 응급환자 이송 및 응급실 이용 분석")
 transport_path = "data/정보_01_행정안전부_응급환자이송업(공공데이터포털).csv"
 time_json_path = "data/정보_SOS_03.json"
 month_json_path = "data/정보_SOS_02.json"
-# 🛣️ 도로망 SHP 파일 경로 추가 (실제 파일명으로 변경하세요)
-road_network_path = "data/TL_SPCL_ROAD_2023.shp" # 예시 파일명, 실제 파일명으로 변경 필요
+# 🛣️ 도로망 SHP 파일 경로는 이제 필요 없습니다. (osmnx가 직접 다운로드)
 
 # -------------------------------
 # 데이터 로딩 함수
 # -------------------------------
 
-# ... (기존 load_transport_data 함수는 그대로 유지) ...
+# ... (load_transport_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_transport_data(path):
     if not os.path.exists(path):
@@ -67,7 +67,7 @@ def load_transport_data(path):
         st.error(f"'{path}' 파일을 로드하는 중 최상위 오류 발생: {e}")
         return pd.DataFrame()
 
-# ... (기존 load_time_data 함수는 그대로 유지) ...
+# ... (load_time_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_time_data(path):
     try:
@@ -98,7 +98,7 @@ def load_time_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
-# ... (기존 load_month_data 함수는 그대로 유지) ...
+# ... (load_month_data 함수는 그대로 유지) ...
 @st.cache_data
 def load_month_data(path):
     try:
@@ -130,53 +130,29 @@ def load_month_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
-# 🛣️ 도로망 SHP 파일을 로드하고 networkx 그래프로 변환하는 함수
+# 🛣️ osmnx를 사용하여 도로망 그래프를 로드하고 networkx 그래프로 반환하는 함수
 @st.cache_data
-def load_road_network(path):
-    if not os.path.exists(path):
-        st.error(f"도로망 SHP 파일을 찾을 수 없습니다: {path}")
-        st.warning("SHP 파일은 `.shp`, `.shx`, `.dbf`, `.prj` 등 여러 파일로 구성되어 있으며, 모두 'data/' 폴더에 함께 있어야 합니다.")
-        return None
-
+def load_road_network_from_osmnx(place_name):
     try:
-        # GeoDataFrame으로 SHP 파일 로드
-        gdf = gpd.read_file(path)
-        st.info(f"'{path}' 도로망 SHP 파일을 성공적으로 로드했습니다. 현재 CRS: {gdf.crs}")
-
-        # 모든 데이터를 위도/경도(EPSG:4326)로 통일
-        if gdf.crs != 'EPSG:4326':
-            gdf = gdf.to_crs(epsg=4326)
-            st.info("도로망 좌표계를 EPSG:4326 (위도/경도)으로 변환했습니다.")
+        # osmnx를 사용하여 특정 지역의 도로망 그래프를 가져옵니다.
+        # network_type='drive'는 차량이 통행 가능한 도로만 가져오도록 합니다.
+        # simplify=True는 복잡한 지오메트리를 단순화하여 그래프 크기를 줄입니다.
+        # retain_all=True는 그래프의 모든 연결 요소를 유지합니다. (큰 그래프의 경우 False 고려)
+        # custom_settings는 필요에 따라 추가적인 Overpass API 설정 가능
+        st.info(f"'{place_name}' 지역의 도로망 데이터를 OpenStreetMap에서 가져오는 중입니다. 잠시 기다려주세요...")
         
-        # NetworkX 그래프 객체 생성
-        G = nx.Graph() # 무방향 그래프 (도로는 양방향 통행 가능하다고 가정)
-                       # 만약 일방통행 정보가 있다면 nx.DiGraph() 사용 고려
-
-        # 각 도로 세그먼트(LineString)를 그래프의 간선으로 추가
-        # 노드는 LineString의 시작점과 끝점이 됩니다.
-        for idx, row in gdf.iterrows():
-            if row.geometry and row.geometry.geom_type == 'LineString':
-                line = row.geometry
-                # 각 세그먼트의 시작점과 끝점 좌표를 노드로 사용
-                start_node_coords = (line.coords[0][0], line.coords[0][1]) # (경도, 위도)
-                end_node_coords = (line.coords[-1][0], line.coords[-1][1]) # (경도, 위도)
-                
-                # 노드 추가 (노드 이름은 좌표 튜플)
-                G.add_node(start_node_coords, pos=start_node_coords)
-                G.add_node(end_node_coords, pos=end_node_coords)
-                
-                # 간선 추가. 가중치는 도로 길이(도 단위)로 설정
-                # 실제 경로 탐색 시에는 미터/킬로미터 단위로 변환 필요
-                # 여기서는 단순히 길이만 사용하지만, 나중에 교통량/기상으로 보정
-                length = line.length # 지리 좌표계에서 길이는 도(degree) 단위
-                G.add_edge(start_node_coords, end_node_coords, weight=length)
+        G = ox.graph_from_place(place_name, network_type='drive', simplify=True, retain_all=True)
         
-        st.success(f"도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
+        # 그래프의 좌표계가 위도/경도(EPSG:4326)인지 확인 (osmnx는 기본적으로 이 형식을 따름)
+        # ox.add_edge_speeds(G) # 필요시 도로별 기본 속도 추가
+        # ox.add_edge_travel_times(G) # 필요시 각 간선의 통행 시간 계산 (속도 기반)
+        
+        st.success(f"'{place_name}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
         return G
 
     except Exception as e:
-        st.error(f"도로망 SHP 파일을 로드하고 그래프로 변환하는 중 오류 발생: {e}")
-        st.warning("`geopandas` 및 `networkx` 라이브러리가 올바르게 설치되었는지 확인하고, SHP 파일이 손상되지 않았는지 확인해주세요.")
+        st.error(f"'{place_name}' 도로망 데이터를 OpenStreetMap에서 가져오고 그래프로 변환하는 중 오류 발생: {e}")
+        st.warning("네트워크 연결을 확인하거나, 지역 이름이 정확한지 확인해주세요. 너무 큰 지역을 지정하면 메모리 부족이나 타임아웃이 발생할 수 있습니다.")
         return None
 
 # -------------------------------
@@ -215,12 +191,11 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
         for part in parts:
             if isinstance(part, str) and ('특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part):
                 if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part or '제주' in part:
-                    # 복합 시도명 처리 (예: 강원특별자치도, 제주특별자치도)
-                    if len(parts) > 1: # 두 단어 이상인 경우 첫 부분 + 두 번째 부분 결합
+                    if len(parts) > 1:
                         return f"{parts[0]}{part}"
-                    else: # 이미 전체 이름인 경우
+                    else:
                         return part
-                return part # 서울특별시, 부산광역시 등 (한 단어인 경우)
+                return part
 
         return None 
 
@@ -236,8 +211,10 @@ elif not transport_df.empty:
 
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
-# 🛣️ 도로망 그래프 로드 (새로 추가된 부분)
-road_graph = load_road_network(road_network_path)
+
+# 🛣️ 도로망 그래프 로드 (osmnx 함수로 변경)
+# 'Yongin-si, Gyeonggi-do, South Korea' 또는 '서울특별시' 등으로 변경 가능
+road_graph = load_road_network_from_osmnx("Yongin-si, Gyeonggi-do, South Korea") 
 
 
 # -------------------------------
@@ -245,15 +222,20 @@ road_graph = load_road_network(road_network_path)
 # -------------------------------
 st.sidebar.title("사용자 설정")
 if not time_df.empty and not month_df.empty:
-    common_regions = list(set(time_df['시도']) & set(month_df['시도']))
-    if common_regions:
-        region = st.sidebar.selectbox("지역 선택", sorted(common_regions))
+    # transport_df의 시도명도 추가하여 공통 지역 선택에 활용
+    all_regions = set(time_df['시도']) | set(month_df['시도'])
+    if not transport_df.empty and '시도명' in transport_df.columns:
+        all_regions |= set(transport_df['시도명'].unique()) # transport_df의 시도명도 추가
+    
+    if all_regions:
+        region = st.sidebar.selectbox("지역 선택", sorted(list(all_regions)))
     else:
-        st.sidebar.warning("시간대별 및 월별 데이터에 공통 지역이 없습니다.")
+        st.sidebar.warning("데이터에 공통 지역이 없습니다.")
         region = None
 else:
     st.sidebar.warning("시간대별 또는 월별 데이터가 로드되지 않았습니다.")
     region = None
+
 
 # -------------------------------
 # 1️⃣ 응급환자 이송 현황
@@ -266,8 +248,14 @@ if not transport_df.empty:
     
     if '시도명' in transport_df.columns and transport_df['시도명'].notna().any(): 
         fig1, ax1 = plt.subplots(figsize=(10, 5))
-        transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') 
-        ax1.set_title("시도별 이송 건수")
+        # 특정 지역이 선택되었을 경우 해당 지역만 필터링하여 이송 건수 시각화
+        if region and region in transport_df['시도명'].unique():
+            transport_df[transport_df['시도명'] == region].groupby('시도명').size().plot(kind='barh', ax=ax1, color='skyblue') 
+            ax1.set_title(f"{region} 시도별 이송 건수") # 제목 변경
+        else:
+            transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') 
+            ax1.set_title("시도별 이송 건수")
+        
         ax1.set_xlabel("건수")
         ax1.set_ylabel("시도")
         plt.tight_layout() 
@@ -282,14 +270,18 @@ else:
 # -------------------------------
 st.subheader("2️⃣ 시간대별 응급실 이용 현황 (2023)")
 if not time_df.empty and region:
-    time_row = time_df[time_df['시도'] == region].iloc[0, 1:]
-    
-    fig2, ax2 = plt.subplots()
-    time_row.plot(kind='bar', color='deepskyblue', ax=ax2)
-    ax2.set_ylabel("이용 건수")
-    ax2.set_xlabel("시간대")
-    ax2.set_title(f"{region} 시간대별 응급실 이용")
-    st.pyplot(fig2)
+    # 선택된 지역에 대한 시간대별 데이터를 찾음
+    time_row = time_df[time_df['시도'] == region]
+    if not time_row.empty:
+        time_row_data = time_row.iloc[0, 1:]
+        fig2, ax2 = plt.subplots()
+        time_row_data.plot(kind='bar', color='deepskyblue', ax=ax2)
+        ax2.set_ylabel("이용 건수")
+        ax2.set_xlabel("시간대")
+        ax2.set_title(f"{region} 시간대별 응급실 이용")
+        st.pyplot(fig2)
+    else:
+        st.warning(f"'{region}' 지역에 대한 시간대별 데이터가 없습니다.")
 else:
     st.warning("시간대별 데이터 로드에 문제가 있거나 지역이 선택되지 않았습니다.")
 
@@ -298,28 +290,40 @@ else:
 # -------------------------------
 st.subheader("3️⃣ 월별 응급실 이용 현황 (2023)")
 if not month_df.empty and region:
-    month_row = month_df[month_df['시도'] == region].iloc[0, 1:]
-    
-    fig3, ax3 = plt.subplots()
-    month_row.plot(kind='line', marker='o', color='seagreen', ax=ax3)
-    ax3.set_ylabel("이용 건수")
-    ax3.set_xlabel("월")
-    ax3.set_title(f"{region} 월별 응급실 이용")
-    st.pyplot(fig3)
+    # 선택된 지역에 대한 월별 데이터를 찾음
+    month_row = month_df[month_df['시도'] == region]
+    if not month_row.empty:
+        month_row_data = month_row.iloc[0, 1:]
+        fig3, ax3 = plt.subplots()
+        month_row_data.plot(kind='line', marker='o', color='seagreen', ax=ax3)
+        ax3.set_ylabel("이용 건수")
+        ax3.set_xlabel("월")
+        ax3.set_title(f"{region} 월별 응급실 이용")
+        st.pyplot(fig3)
+    else:
+        st.warning(f"'{region}' 지역에 대한 월별 데이터가 없습니다.")
 else:
     st.warning("월별 데이터 로드에 문제가 있거나 지역이 선택되지 않았습니다.")
 
+
 # -------------------------------
-# 4️⃣ 도로망 그래프 정보 (새로 추가된 섹션)
+# 4️⃣ 도로망 그래프 정보 (osmnx로 변경)
 # -------------------------------
 st.subheader("🛣️ 도로망 그래프 정보")
 if road_graph:
-    st.write(f"**로드된 도로망 그래프:**")
+    st.write(f"**로드된 도로망 그래프 (`{road_graph.graph['place']}`):**")
     st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
     st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
-    # 그래프 시각화는 나중에 지도 위에 렌더링 섹션에서 더 상세히 다룰 예정
+    
+    # 맵 위에 그래프 시각화 (간단한 예시)
+    st.write("간단한 도로망 지도 시각화 (노드와 간선):")
+    fig, ax = ox.plot_graph(road_graph, show=False, close=False, bgcolor='white', node_color='red', node_size=5, edge_color='gray', edge_linewidth=0.5)
+    st.pyplot(fig) # Streamlit에 Matplotlib 그림 표시
+    st.caption("참고: 전체 도로망은 복잡하여 로딩이 느릴 수 있습니다.")
+
 else:
-    st.warning("도로망 그래프 로드에 실패했습니다. SHP 파일 경로와 파일 유무를 확인해주세요.")
+    st.warning("도로망 그래프 로드에 실패했습니다. 지정된 지역을 확인해주세요.")
+
 
 # -------------------------------
 # 5️⃣ 우선순위 큐 시뮬레이션
