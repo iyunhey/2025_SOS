@@ -130,14 +130,15 @@ def load_month_data(path):
 
 # osmnx를 사용하여 도로망 그래프를 로드하고 networkx 그래프로 반환하는 함수
 @st.cache_data(show_spinner="도로망 데이터를 OpenStreetMap에서 가져오는 중입니다...")
-def load_road_network_from_osmnx(place_name):
+def load_road_network_from_osmnx(place_names): # place_names를 리스트로 받음
     try:
-        G = ox.graph_from_place(place_name, network_type='drive', simplify=True, retain_all=True)
-        st.success(f"'{place_name}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
+        # ox.graph_from_places를 사용하여 여러 지역의 도로망을 한 번에 로드
+        G = ox.graph_from_places(place_names, network_type='drive', simplify=True, retain_all=True)
+        st.success(f"'{place_names}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
         return G
 
     except Exception as e:
-        st.error(f"'{place_name}' 도로망 데이터를 OpenStreetMap에서 가져오고 그래프로 변환하는 중 오류 발생: {e}")
+        st.error(f"'{place_names}' 도로망 데이터를 OpenStreetMap에서 가져오고 그래프로 변환하는 중 오류 발생: {e}")
         st.warning("네트워크 연결을 확인하거나, 지역 이름이 정확한지 확인해주세요. 너무 큰 지역을 지정하면 메모리 부족이나 타임아웃이 발생할 수 있습니다.")
         return None
 
@@ -184,10 +185,6 @@ def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
         st.success(f"경로 탐색 완료! 총 길이: {route_length:.2f} 미터")
 
         # 경로 시각화
-        # orig_dest_points: (위도, 경도) 리스트. 지도에 점을 찍어줌.
-        # orig_dest_node_color, orig_dest_node_size: 시작/도착 노드의 색상 및 크기
-        # node_color: 모든 노드의 기본 색상
-        # node_size: 모든 노드의 기본 크기 (0으로 설정하여 경로 노드만 보이게 하고 시작/도착 노드는 별도로 강조)
         fig, ax = ox.plot_graph_route(graph, route,
                                       route_color='r', route_linewidth=5,
                                       node_size=0, # 모든 노드 기본 크기를 0으로
@@ -198,17 +195,12 @@ def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
                                       orig_dest_node_alpha=0.9 # 투명도
                                      )
 
-        # 출발/도착 노드도 따로 표시 (기존 노드 시각화 위로 덮어씌우는 효과)
-        # 이미 orig_dest_node_color/size로 충분히 강조되지만, 추가적인 조절이 필요할 경우 활용
-        # ax.scatter(graph.nodes[origin_node]['x'], graph.nodes[origin_node]['y'], c='darkblue', s=200, marker='o', zorder=5, label='출발 노드')
-        # ax.scatter(graph.nodes[destination_node]['x'], graph.nodes[destination_node]['y'], c='darkgreen', s=200, marker='X', zorder=5, label='도착 노드')
-
         st.pyplot(fig)
         st.caption(f"빨간색 선은 최단 경로를 나타내며, 파란색 점은 출발지, 초록색 점은 아주대병원을 나타냅니다. 총 길이: {route_length:.2f} 미터")
         return route, route_length
 
     except nx.NetworkXNoPath:
-        st.error("지정된 시작점과 도착점 사이에 경로를 찾을 수 없습니다. (경로가 단절되었거나 너무 멀리 떨어져 있을 수 있습니다.)")
+        st.error("지정된 시작점과 도착점 사이에 경로를 찾을 수 없습니다. (경로가 단절되었거나, 선택한 좌표가 도로에서 너무 멀리 떨어져 있거나, 병원 위치가 로드된 지도 범위를 벗어났을 수 있습니다.)")
         return None, None
     except Exception as e:
         st.error(f"경로 탐색 중 오류 발생: {e}")
@@ -342,26 +334,29 @@ elif not transport_df.empty:
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
 
-# Road network는 용인시로 고정
-place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea"
-road_graph = load_road_network_from_osmnx(place_for_osmnx)
+# Road network는 용인시와 수원시를 함께 로드
+# place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea" # 단일 지역에서
+place_for_osmnx = ["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"] # 두 지역 로드로 변경
+
+road_graph = load_road_network_from_osmnx(place_for_osmnx) # 리스트를 인자로 전달
 if road_graph:
     st.session_state.road_graph = road_graph # 세션 상태에 그래프 저장
 
 # 용인시 바운딩 박스 정보 가져오기 (슬라이더 범위 설정용)
 # @st.cache_data를 사용하여 한번만 실행
 @st.cache_data
-def get_yongin_bounds(place_name):
+def get_yongin_bounds(place_name_for_bounds): # 단일 지역의 바운딩 박스만 가져옴 (환자 출발지는 용인시로 제한하기 위함)
     try:
-        gdf = ox.geocode_to_gdf(place_name)
+        gdf = ox.geocode_to_gdf(place_name_for_bounds)
         south, north, west, east = gdf.unary_union.bounds
-        st.success(f"용인시 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
+        st.success(f"환자 출발지 (용인시) 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
         return south, north, west, east
     except Exception as e:
         st.error(f"용인시 경계 정보를 가져오는 데 실패했습니다: {e}")
-        return 37.1, 37.3, 127.0, 127.3 # Fallback 값
+        return 37.1, 37.3, 127.0, 127.3 # Fallback 값 (경기도 용인시 근처)
 
-yongin_south, yongin_north, yongin_west, yongin_east = get_yongin_bounds(place_for_osmnx)
+# 슬라이더는 환자의 출발지를 용인시로 제한하므로, 용인시의 바운딩 박스만 가져옵니다.
+yongin_south, yongin_north, yongin_west, yongin_east = get_yongin_bounds("Yongin-si, Gyeonggi-do, South Korea")
 
 
 # -------------------------------
@@ -454,7 +449,7 @@ else:
 # -------------------------------
 st.subheader("🛣️ 도로망 그래프 정보")
 if road_graph:
-    st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**")
+    st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**") # 변경된 place_for_osmnx 출력
     st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
     st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
 
