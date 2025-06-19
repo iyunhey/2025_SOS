@@ -162,7 +162,7 @@ def geocode_address(address, user_agent="emergency_app"):
         return None, None
 
 # -------------------------------
-# ✨ 중증도 맵핑 정의 ✨
+# 중증도 맵핑 정의
 severity_scores = {
     "경증": 1,
     "중등증": 3,
@@ -171,7 +171,7 @@ severity_scores = {
     "매우_응급": 20 
 }
 
-# ✨ 우선순위 큐 클래스 수정 ✨
+# 우선순위 큐 클래스
 import heapq
 
 class PriorityQueue:
@@ -179,32 +179,22 @@ class PriorityQueue:
         self.heap = [] # (우선순위 점수, 삽입 순서, 환자 정보) 튜플 저장
         self.counter = 0 # 삽입 순서 (고유성 및 선입선출 보장용)
 
-    # ✨ queue_type 인자 추가 ✨
     def insert(self, patient_info, priority_score, queue_type="큐 (선입선출)"):
-        # heapq는 기본적으로 최소 힙이므로, 높은 응급도를 높은 숫자로 정의했다면
-        # 음수로 변환하여 저장하면 가장 높은 응급도(큰 양수)가 가장 작은 음수가 되어 최상위로 옴
         adjusted_score = -priority_score
         
-        # ✨ 동일 중증도 내 선입선출/후입선출 로직 적용 ✨
         if queue_type == "큐 (선입선출)":
-            # 삽입 순서가 낮은(먼저 들어온) 것이 우선
             entry = [adjusted_score, self.counter, patient_info]
         elif queue_type == "스택 (후입선출)":
-            # 삽입 순서가 높은(나중에 들어온) 것의 음수 값이 더 작아지므로 우선
             entry = [adjusted_score, -self.counter, patient_info]
         else:
-            # 기본값은 선입선출
             entry = [adjusted_score, self.counter, patient_info]
 
         heapq.heappush(self.heap, entry)
-        self.counter += 1 # 카운터 증가 (삽입 순서 추적)
-        
-        # 환자 히스토리는 필요하다면 남겨두세요 (여기서는 사용하지 않음)
-        # st.session_state.get('patient_queue_history', []).append(patient_info['이름']) 
+        self.counter += 1 
 
     def get_highest_priority_patient(self):
         if not self.heap:
-            return None  
+            return None, None  # 변경: 환자 정보와 점수를 함께 반환하도록
         adjusted_score, _, patient_info = heapq.heappop(self.heap)
         original_score = -adjusted_score
         return patient_info, original_score
@@ -214,15 +204,12 @@ class PriorityQueue:
 
     def peek(self):
         if not self.heap:
-            return None
+            return None, None
         adjusted_score, _, patient_info = self.heap[0]
         original_score = -adjusted_score
         return patient_info, original_score
         
     def get_all_patients_sorted(self):
-        # 현재 힙의 모든 항목을 복사하여 정렬된 형태로 반환 (실제 힙 변경 없음)
-        # 힙은 내부적으로 순서가 보장되지만, 전체 리스트로 볼 때는 정렬이 필요
-        # 튜플의 첫 번째 요소(우선순위 점수), 두 번째 요소(삽입 순서) 순으로 정렬됨
         temp_heap = sorted(self.heap) 
         sorted_patients = []
         for adjusted_score, _, patient_info in temp_heap:
@@ -233,9 +220,12 @@ class PriorityQueue:
             })
         return sorted_patients
 
-# Streamlit session_state에 우선순위 큐 인스턴스 저장
+# Streamlit session_state에 우선순위 큐 인스턴스 및 현재 진료중인 환자 정보 저장
 if 'priority_queue' not in st.session_state:
     st.session_state.priority_queue = PriorityQueue()
+# ✨ 현재 진료중인 환자 정보 저장 변수 추가 ✨
+if 'current_patient_in_treatment' not in st.session_state:
+    st.session_state.current_patient_in_treatment = None
 
 
 # ... (데이터 로드 및 전처리 부분은 동일) ...
@@ -248,8 +238,6 @@ if 'priority_queue' not in st.session_state:
 # -------------------------------
 st.subheader("5️⃣ 응급환자 진단 및 대기열 관리 시뮬레이션")
 
-# 대기 방식 선택 라디오 버튼 (이제 이 값이 큐 동작에 영향을 미침)
-# 이 라디오 버튼을 여기에 옮겨야 진단서 작성 시점에 값을 참조할 수 있습니다.
 mode = st.radio("동일 중증도 내 대기 방식 선택", ['큐 (선입선출)', '스택 (후입선출)'])
 
 
@@ -309,13 +297,29 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
             "계산된 점수": final_priority_score 
         }
         
-        # ✨ 큐 타입(mode)을 insert 함수에 전달 ✨
         st.session_state.priority_queue.insert(patient_info, final_priority_score, queue_type=mode)
         st.success(f"'{patient_name}' 환자가 '{current_severity_level}' (점수: {final_priority_score}) 상태로 큐에 추가되었습니다.")
-        st.rerun() # 큐 현황을 즉시 업데이트하기 위해
+        st.rerun() 
 
     elif submit_diagnosis and not patient_name:
         st.warning("환자 이름을 입력해주세요.")
+
+# -------------------------------
+# ✨ 현재 진료중인 환자 정보 표시 섹션 추가 ✨
+st.markdown("#### 👨‍⚕️ 현재 진료중인 환자")
+if st.session_state.current_patient_in_treatment:
+    patient = st.session_state.current_patient_in_treatment
+    st.info(
+        f"**이름:** {patient['이름']} | "
+        f"**중증도:** {patient['중증도']} (점수: {patient['계산된 점수']}) | "
+        f"**의식:** {patient['의식 상태']} | "
+        f"**호흡:** {patient['호흡 곤란']} | "
+        f"**통증/출혈:** {patient['통증/출혈']} | "
+        f"**외상:** {patient['외상']}"
+    )
+else:
+    st.info("현재 진료중인 환자가 없습니다.")
+# -------------------------------
 
 # 대기열 현황 및 진료 섹션
 st.markdown("#### 🏥 현재 응급 대기열 현황")
@@ -328,16 +332,19 @@ if not st.session_state.priority_queue.is_empty():
         process_patient = st.button("환자 진료 시작 (가장 응급한 환자)")
         if process_patient:
             processed_patient, score = st.session_state.priority_queue.get_highest_priority_patient()
-            if processed_patient: # None이 아닌지 확인
-                st.info(f"**{processed_patient['이름']}** 환자 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
+            if processed_patient: 
+                # ✨ 진료 시작된 환자 정보를 session_state에 저장 ✨
+                st.session_state.current_patient_in_treatment = processed_patient
+                st.success(f"**{processed_patient['이름']}** 환자가 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
             else:
+                st.session_state.current_patient_in_treatment = None # 큐가 비었으면 진료중인 환자 없음
                 st.warning("진료할 환자가 없습니다.")
             st.rerun() 
     with col2:
-        # 이 부분은 이제 실제 로직에 반영되므로, 안내 문구는 불필요하거나 변경 가능
         st.markdown(f"현재 선택된 대기 방식: **{mode}** (동일 중증도 내 적용)")
 else:
     st.info("현재 응급 대기 환자가 없습니다.")
+    st.session_state.current_patient_in_treatment = None # 큐가 비면 진료중인 환자 없음
 
 st.markdown("---")
 st.caption("ⓒ 2025 스마트 응급의료 데이터 분석 프로젝트 - SDG 3.8 보건서비스 접근성 개선")
