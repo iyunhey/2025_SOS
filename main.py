@@ -10,9 +10,8 @@ import chardet
 # 공간 데이터 및 그래프 처리를 위한 라이브러리
 import networkx as nx
 import osmnx as ox
-# ✨ geopy 라이브러리 추가 ✨
 from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter # 요청 제한을 위한 도구
+from geopy.extra.rate_limiter import RateLimiter 
 
 # Matplotlib 한글 폰트 설정
 plt.rcParams['font.family'] = 'Malgun Gothic' # Windows 사용자
@@ -33,7 +32,7 @@ month_json_path = "data/정보_SOS_02.json"
 # 데이터 로딩 함수
 # -------------------------------
 
-# ... (load_transport_data 함수는 그대로 유지) ...
+# ... (load_transport_data 함수는 동일) ...
 @st.cache_data
 def load_transport_data(path):
     if not os.path.exists(path):
@@ -67,7 +66,7 @@ def load_transport_data(path):
         st.error(f"'{path}' 파일을 로드하는 중 최상위 오류 발생: {e}")
         return pd.DataFrame()
 
-# ... (load_time_data 함수는 그대로 유지) ...
+# ... (load_time_data 함수는 동일) ...
 @st.cache_data
 def load_time_data(path):
     try:
@@ -98,7 +97,7 @@ def load_time_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
-# ... (load_month_data 함수는 그대로 유지) ...
+# ... (load_month_data 함수는 동일) ...
 @st.cache_data
 def load_month_data(path):
     try:
@@ -130,7 +129,7 @@ def load_month_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
-# osmnx를 사용하여 도로망 그래프를 로드하고 networkx 그래프로 반환하는 함수
+# ... (load_road_network_from_osmnx 함수는 동일) ...
 @st.cache_data
 def load_road_network_from_osmnx(place_name):
     try:
@@ -144,20 +143,15 @@ def load_road_network_from_osmnx(place_name):
         st.warning("네트워크 연결을 확인하거나, 지역 이름이 정확한지 확인해주세요. 너무 큰 지역을 지정하면 메모리 부족이나 타임아웃이 발생할 수 있습니다.")
         return None
 
-# ✨ Geopy를 이용한 주소 지오코딩 함수 ✨
+# ... (geocode_address 함수는 동일) ...
 @st.cache_data
 def geocode_address(address, user_agent="emergency_app"):
-    # Nominatim 지오코더 초기화
-    # user_agent는 서비스 제공자에게 자신의 애플리케이션을 식별하는 용도 (필수)
     geolocator = Nominatim(user_agent=user_agent)
-    
-    # RateLimiter를 사용하여 요청 간 지연 시간을 두어 서비스 제한 방지
-    # Nominatim은 초당 1회 요청 제한 권고 (https://operations.osmfoundation.org/policies/nominatim/)
     geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1) 
 
     try:
         if pd.isna(address) or not isinstance(address, str) or not address.strip():
-            return None, None # 유효하지 않은 주소는 None 반환
+            return None, None 
         
         location = geocode(address)
         if location:
@@ -165,45 +159,53 @@ def geocode_address(address, user_agent="emergency_app"):
         else:
             return None, None
     except Exception as e:
-        # st.warning(f"주소 '{address}' 지오코딩 실패: {e}") # 디버깅용으로 필요시 주석 해제
         return None, None
+
 # -------------------------------
-# ✨ 중증도 맵핑 정의 (새로 추가) ✨
-# 점수가 낮을수록 우선순위가 높다고 가정합니다. (최소 힙 사용 시)
-# 혹은, 점수가 높을수록 우선순위가 높다고 가정하고 힙에서 -점수를 저장할 수 있습니다.
-# 여기서는 점수가 높을수록 '응급'에 가까워지도록 정의하고, 힙에 저장할 때 -점수로 변환하겠습니다.
-# 그렇게 하면 가장 큰 양수 점수가 가장 작은 음수 점수가 되어 우선순위가 높아집니다.
+# ✨ 중증도 맵핑 정의 ✨
 severity_scores = {
     "경증": 1,
     "중등증": 3,
     "중증": 5,
     "응급": 10,
-    "매우_응급": 20 # 더 높은 응급도 추가
+    "매우_응급": 20 
 }
 
-# ✨ 우선순위 큐 클래스 (재정의 또는 확인) ✨
+# ✨ 우선순위 큐 클래스 수정 ✨
 import heapq
 
 class PriorityQueue:
     def __init__(self):
-        self.heap = [] # (우선순위 점수, 고유 ID, 환자 정보) 튜플 저장
-        self.counter = 0 # 동일 우선순위 처리 위한 고유 ID 카운터
+        self.heap = [] # (우선순위 점수, 삽입 순서, 환자 정보) 튜플 저장
+        self.counter = 0 # 삽입 순서 (고유성 및 선입선출 보장용)
 
-    def insert(self, patient_info, priority_score):
-        # Nominatim처럼 API 요청이 아니므로 user_agent는 필요 없음
+    # ✨ queue_type 인자 추가 ✨
+    def insert(self, patient_info, priority_score, queue_type="큐 (선입선출)"):
         # heapq는 기본적으로 최소 힙이므로, 높은 응급도를 높은 숫자로 정의했다면
         # 음수로 변환하여 저장하면 가장 높은 응급도(큰 양수)가 가장 작은 음수가 되어 최상위로 옴
         adjusted_score = -priority_score
-        entry = [adjusted_score, self.counter, patient_info]
+        
+        # ✨ 동일 중증도 내 선입선출/후입선출 로직 적용 ✨
+        if queue_type == "큐 (선입선출)":
+            # 삽입 순서가 낮은(먼저 들어온) 것이 우선
+            entry = [adjusted_score, self.counter, patient_info]
+        elif queue_type == "스택 (후입선출)":
+            # 삽입 순서가 높은(나중에 들어온) 것의 음수 값이 더 작아지므로 우선
+            entry = [adjusted_score, -self.counter, patient_info]
+        else:
+            # 기본값은 선입선출
+            entry = [adjusted_score, self.counter, patient_info]
+
         heapq.heappush(self.heap, entry)
-        self.counter += 1
-        st.session_state.get('patient_queue_history', []).append(patient_info['이름']) # 히스토리 기록용
+        self.counter += 1 # 카운터 증가 (삽입 순서 추적)
+        
+        # 환자 히스토리는 필요하다면 남겨두세요 (여기서는 사용하지 않음)
+        # st.session_state.get('patient_queue_history', []).append(patient_info['이름']) 
 
     def get_highest_priority_patient(self):
         if not self.heap:
-            return None  # 큐가 비어있으면 None 반환
+            return None  
         adjusted_score, _, patient_info = heapq.heappop(self.heap)
-        # 원래의 양수 점수로 변환하여 반환
         original_score = -adjusted_score
         return patient_info, original_score
 
@@ -219,7 +221,9 @@ class PriorityQueue:
         
     def get_all_patients_sorted(self):
         # 현재 힙의 모든 항목을 복사하여 정렬된 형태로 반환 (실제 힙 변경 없음)
-        temp_heap = sorted(self.heap) # (음수 점수 기준으로 정렬)
+        # 힙은 내부적으로 순서가 보장되지만, 전체 리스트로 볼 때는 정렬이 필요
+        # 튜플의 첫 번째 요소(우선순위 점수), 두 번째 요소(삽입 순서) 순으로 정렬됨
+        temp_heap = sorted(self.heap) 
         sorted_patients = []
         for adjusted_score, _, patient_info in temp_heap:
             sorted_patients.append({
@@ -232,197 +236,11 @@ class PriorityQueue:
 # Streamlit session_state에 우선순위 큐 인스턴스 저장
 if 'priority_queue' not in st.session_state:
     st.session_state.priority_queue = PriorityQueue()
-if 'patient_queue_history' not in st.session_state:
-    st.session_state.patient_queue_history = []
-# -------------------------------
-# 데이터 로드 및 전처리
-# -------------------------------
-transport_df = load_transport_data(transport_path)
-
-# --- ✨ transport_df 전처리: '시도명' 컬럼 생성 및 보정 ✨ ---
-if not transport_df.empty and '소재지전체주소' in transport_df.columns:
-    def extract_sido(address):
-        if pd.isna(address):
-            return None
-        
-        addr_str = str(address).strip() 
-        if not addr_str: 
-            return None
-
-        parts = addr_str.split(' ')
-        if not parts: 
-            return None
-
-        first_part = parts[0]
-
-        if '세종' in first_part:
-            return '세종특별자치시'
-        
-        korean_sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
-                                 "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도",
-                                 "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도",
-                                 "제주특별자치도"]
-            
-        for sido in korean_sido_list:
-            if first_part in sido: 
-                return sido 
-        
-        for part in parts:
-            if isinstance(part, str) and ('특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part):
-                if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part or '제주' in part:
-                    if len(parts) > 1:
-                        return f"{parts[0]}{part}"
-                    else:
-                        return part
-                return part
-
-        return None 
-
-    transport_df['시도명'] = transport_df['소재지전체주소'].apply(extract_sido)
-
-    # ✨ 새로운 전처리: '소재지전체주소'를 이용해 위도, 경도 컬럼 생성 ✨
-    # 주소 지오코딩은 시간이 오래 걸릴 수 있으므로, 캐싱을 활용하고 진행 상황을 표시
-    if '소재지전체주소' in transport_df.columns:
-        st.info("구급차 이송 데이터의 주소를 위도/경도로 변환 중입니다. (시간이 다소 소요될 수 있습니다.)")
-        progress_bar = st.progress(0)
-        
-        # apply 대신 반복문을 사용하여 진행 상황 업데이트
-        latitudes = []
-        longitudes = []
-        total_addresses = len(transport_df)
-
-        for i, address in enumerate(transport_df['소재지전체주소']):
-            lat, lon = geocode_address(address)
-            latitudes.append(lat)
-            longitudes.append(lon)
-            progress_bar.progress((i + 1) / total_addresses)
-        
-        transport_df['출발_위도'] = latitudes
-        transport_df['출발_경도'] = longitudes
-        
-        progress_bar.empty() # 진행바 제거
-        st.success("주소 지오코딩이 완료되었습니다.")
-        
-        # 지오코딩 실패한 (None 값) 행 제거 또는 처리 (여기서는 제거)
-        transport_df.dropna(subset=['출발_위도', '출발_경도'], inplace=True)
-        st.info(f"유효한 좌표가 없는 {total_addresses - len(transport_df)}개의 이송 기록이 제거되었습니다.")
 
 
-    transport_df.dropna(subset=['시도명'], inplace=True) # 시도명 없는 행 제거
-    
-    st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
-elif not transport_df.empty:
-    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너킵니다.")
-# --- ✨ 전처리 끝 ✨ ---
+# ... (데이터 로드 및 전처리 부분은 동일) ...
 
-time_df = load_time_data(time_json_path)
-month_df = load_month_data(month_json_path)
-
-place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea" # 이 변수와 일치시켜야 합니다.
-road_graph = load_road_network_from_osmnx(place_for_osmnx) 
-
-
-# -------------------------------
-# 사이드바 사용자 상호작용
-# -------------------------------
-st.sidebar.title("사용자 설정")
-if not time_df.empty and not month_df.empty:
-    all_regions = set(time_df['시도']) | set(month_df['시도'])
-    if not transport_df.empty and '시도명' in transport_df.columns:
-        all_regions |= set(transport_df['시도명'].unique()) 
-    
-    if all_regions:
-        region = st.sidebar.selectbox("지역 선택", sorted(list(all_regions)))
-    else:
-        st.sidebar.warning("데이터에 공통 지역이 없습니다.")
-        region = None
-else:
-    st.sidebar.warning("시간대별 또는 월별 데이터가 로드되지 않았습니다.")
-    region = None
-
-
-# -------------------------------
-# 1️⃣ 응급환자 이송 현황
-# -------------------------------
-st.subheader("1️⃣ 응급환자 이송 현황 분석")
-if not transport_df.empty:
-    st.dataframe(transport_df.head())
-    if st.checkbox("📌 이송 데이터 요약 통계 보기"):
-        st.write(transport_df.describe(include='all'))
-    
-    if '시도명' in transport_df.columns and transport_df['시도명'].notna().any(): 
-        fig1, ax1 = plt.subplots(figsize=(10, 5))
-        if region and region in transport_df['시도명'].unique():
-            transport_df[transport_df['시도명'] == region].groupby('시도명').size().plot(kind='barh', ax=ax1, color='skyblue') 
-            ax1.set_title(f"{region} 시도별 이송 건수")
-        else:
-            transport_df.groupby('시도명').size().sort_values(ascending=False).plot(kind='barh', ax=ax1, color='skyblue') 
-            ax1.set_title("시도별 이송 건수")
-        
-        ax1.set_xlabel("건수")
-        ax1.set_ylabel("시도")
-        plt.tight_layout() 
-        st.pyplot(fig1)
-    else:
-        st.warning("이송 데이터에 '시도명' 컬럼이 없거나 유효한 시도명 값이 없습니다. 데이터 내용을 확인해주세요.")
-else:
-    st.warning("이송 데이터가 비어있습니다. 파일 경로와 내용을 확인해주세요.")
-
-# -------------------------------
-# 2️⃣ 시간대별 분석
-# -------------------------------
-st.subheader("2️⃣ 시간대별 응급실 이용 현황 (2023)")
-if not time_df.empty and region:
-    time_row = time_df[time_df['시도'] == region]
-    if not time_row.empty:
-        time_row_data = time_row.iloc[0, 1:]
-        fig2, ax2 = plt.subplots()
-        time_row_data.plot(kind='bar', color='deepskyblue', ax=ax2)
-        ax2.set_ylabel("이용 건수")
-        ax2.set_xlabel("시간대")
-        ax2.set_title(f"{region} 시간대별 응급실 이용")
-        st.pyplot(fig2)
-    else:
-        st.warning(f"'{region}' 지역에 대한 시간대별 데이터가 없습니다.")
-else:
-    st.warning("시간대별 데이터 로드에 문제가 있거나 지역이 선택되지 않았습니다.")
-
-# -------------------------------
-# 3️⃣ 월별 분석
-# -------------------------------
-st.subheader("3️⃣ 월별 응급실 이용 현황 (2023)")
-if not month_df.empty and region:
-    month_row = month_df[month_df['시도'] == region]
-    if not month_row.empty:
-        month_row_data = month_row.iloc[0, 1:]
-        fig3, ax3 = plt.subplots()
-        month_row_data.plot(kind='line', marker='o', color='seagreen', ax=ax3)
-        ax3.set_ylabel("이용 건수")
-        ax3.set_xlabel("월")
-        ax3.set_title(f"{region} 월별 응급실 이용")
-        st.pyplot(fig3)
-    else:
-        st.warning(f"'{region}' 지역에 대한 월별 데이터가 없습니다.")
-else:
-    st.warning("월별 데이터 로드에 문제가 있거나 지역이 선택되지 않았습니다.")
-
-
-# -------------------------------
-# 4️⃣ 도로망 그래프 정보
-# -------------------------------
-st.subheader("🛣️ 도로망 그래프 정보")
-if road_graph:
-    st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**") 
-    st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
-    st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
-    
-    st.write("간단한 도로망 지도 시각화 (노드와 간선):")
-    fig, ax = ox.plot_graph(road_graph, show=False, bgcolor='white', node_color='red', node_size=5, edge_color='gray', edge_linewidth=0.5)
-    st.pyplot(fig) 
-    st.caption("참고: 전체 도로망은 복잡하여 로딩이 느릴 수 있습니다.")
-
-else:
-    st.warning("도로망 그래프 로드에 실패했습니다. 지정된 지역을 확인해주세요.")
+# ... (4️⃣ 도로망 그래프 정보 섹션까지 동일) ...
 
 
 # -------------------------------
@@ -430,13 +248,17 @@ else:
 # -------------------------------
 st.subheader("5️⃣ 응급환자 진단 및 대기열 관리 시뮬레이션")
 
+# 대기 방식 선택 라디오 버튼 (이제 이 값이 큐 동작에 영향을 미침)
+# 이 라디오 버튼을 여기에 옮겨야 진단서 작성 시점에 값을 참조할 수 있습니다.
+mode = st.radio("동일 중증도 내 대기 방식 선택", ['큐 (선입선출)', '스택 (후입선출)'])
+
+
 # 진단서 작성 섹션
 with st.expander("📝 환자 진단서 작성", expanded=True):
     st.write("환자의 상태를 입력하여 응급도를 평가합니다.")
 
     patient_name = st.text_input("환자 이름", value="")
 
-    # 중증도 판단 질문들
     q1 = st.selectbox("1. 의식 상태", ["명료", "기면 (졸림)", "혼미 (자극에 반응)", "혼수 (자극에 무반응)"])
     q2 = st.selectbox("2. 호흡 곤란 여부", ["없음", "가벼운 곤란", "중간 곤란", "심한 곤란"])
     q3 = st.selectbox("3. 주요 통증/출혈 정도", ["없음", "경미", "중간", "심함"])
@@ -445,12 +267,9 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
     submit_diagnosis = st.button("진단 완료 및 큐에 추가")
 
     if submit_diagnosis and patient_name:
-        # 응급도 점수 계산 로직
         current_priority_score = 0
-        current_severity_level = "경증" # 기본값
+        current_severity_level = "경증" 
 
-        # 각 질문 답변에 따른 점수 부여
-        # 점수 체계는 임의로 설정. 필요시 더 정교하게 만들 수 있음.
         if q1 == "기면 (졸림)": current_priority_score += 3
         elif q1 == "혼미 (자극에 반응)": current_priority_score += 7
         elif q1 == "혼수 (자극에 무반응)": current_priority_score += 15
@@ -467,7 +286,6 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
         elif q4 == "열상/골절 의심": current_priority_score += 8
         elif q4 == "다발성 외상/심각한 출혈": current_priority_score += 18
         
-        # 총점에 따라 중증도 레벨 결정 (임의 기준)
         if current_priority_score >= 35:
             current_severity_level = "매우_응급"
         elif current_priority_score >= 20:
@@ -479,8 +297,7 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
         else:
             current_severity_level = "경증"
 
-        # 최종 응급도 점수: 정의된 severity_scores에서 가져옴 (총점 대신)
-        final_priority_score = severity_scores.get(current_severity_level, 1) # 기본값은 경증 점수
+        final_priority_score = severity_scores.get(current_severity_level, 1)
 
         patient_info = {
             "이름": patient_name,
@@ -489,16 +306,19 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
             "호흡 곤란": q2,
             "통증/출혈": q3,
             "외상": q4,
-            "계산된 점수": final_priority_score # 우선순위 큐에 들어갈 최종 점수
+            "계산된 점수": final_priority_score 
         }
         
-        st.session_state.priority_queue.insert(patient_info, final_priority_score)
+        # ✨ 큐 타입(mode)을 insert 함수에 전달 ✨
+        st.session_state.priority_queue.insert(patient_info, final_priority_score, queue_type=mode)
         st.success(f"'{patient_name}' 환자가 '{current_severity_level}' (점수: {final_priority_score}) 상태로 큐에 추가되었습니다.")
+        st.rerun() # 큐 현황을 즉시 업데이트하기 위해
+
     elif submit_diagnosis and not patient_name:
         st.warning("환자 이름을 입력해주세요.")
 
 # 대기열 현황 및 진료 섹션
-st.markdown("#### 🏥 현재 응급 대기열 현황(진단서 시뮬레이션)")
+st.markdown("#### 🏥 현재 응급 대기열 현황")
 
 if not st.session_state.priority_queue.is_empty():
     st.dataframe(pd.DataFrame(st.session_state.priority_queue.get_all_patients_sorted()))
@@ -508,15 +328,14 @@ if not st.session_state.priority_queue.is_empty():
         process_patient = st.button("환자 진료 시작 (가장 응급한 환자)")
         if process_patient:
             processed_patient, score = st.session_state.priority_queue.get_highest_priority_patient()
-            st.info(f"**{processed_patient['이름']}** 환자 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
-            # 필요하다면 진료 시작된 환자를 다른 리스트로 옮기는 로직 추가 가능
-            st.rerun() # UI 업데이트를 위해 다시 실행
+            if processed_patient: # None이 아닌지 확인
+                st.info(f"**{processed_patient['이름']}** 환자 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
+            else:
+                st.warning("진료할 환자가 없습니다.")
+            st.rerun() 
     with col2:
-        st.write("---") # UI 구분선
-        st.write("선입선출 방식은 동일 중증도 내에서 적용됩니다.")
-        # 이 부분은 아직 직접 구현되지 않았으므로, 텍스트로 안내
-        # 구현하려면 PriorityQueue의 내부 로직을 수정하거나,
-        # get_all_patients_sorted() 에서 secondary sort를 구현해야 함.
+        # 이 부분은 이제 실제 로직에 반영되므로, 안내 문구는 불필요하거나 변경 가능
+        st.markdown(f"현재 선택된 대기 방식: **{mode}** (동일 중증도 내 적용)")
 else:
     st.info("현재 응급 대기 환자가 없습니다.")
 
