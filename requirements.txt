@@ -5,3 +5,4 @@ seaborn
 chardet
 osmnx
 geopy
+scikit-learn
