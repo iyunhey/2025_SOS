@@ -498,7 +498,7 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
         st.warning("환자 이름을 입력해주세요.")
 
 # 대기열 현황 및 진료 섹션
-st.markdown("#### 🏥 현재 응급 대기열 현황")
+st.markdown("#### 🏥 현재 응급 대기열 현황(진단서 시뮬레이션)")
 
 if not st.session_state.priority_queue.is_empty():
     st.dataframe(pd.DataFrame(st.session_state.priority_queue.get_all_patients_sorted()))
@@ -513,7 +513,7 @@ if not st.session_state.priority_queue.is_empty():
             st.rerun() # UI 업데이트를 위해 다시 실행
     with col2:
         st.write("---") # UI 구분선
-        st.write("선입선출, 후입선출 방식은 동일 중증도 내에서 적용됩니다.")
+        st.write("선입선출 방식은 동일 중증도 내에서 적용됩니다.")
         # 이 부분은 아직 직접 구현되지 않았으므로, 텍스트로 안내
         # 구현하려면 PriorityQueue의 내부 로직을 수정하거나,
         # get_all_patients_sorted() 에서 secondary sort를 구현해야 함.
