@@ -167,7 +167,73 @@ def geocode_address(address, user_agent="emergency_app"):
     except Exception as e:
         # st.warning(f"주소 '{address}' 지오코딩 실패: {e}") # 디버깅용으로 필요시 주석 해제
         return None, None
+# -------------------------------
+# ✨ 중증도 맵핑 정의 (새로 추가) ✨
+# 점수가 낮을수록 우선순위가 높다고 가정합니다. (최소 힙 사용 시)
+# 혹은, 점수가 높을수록 우선순위가 높다고 가정하고 힙에서 -점수를 저장할 수 있습니다.
+# 여기서는 점수가 높을수록 '응급'에 가까워지도록 정의하고, 힙에 저장할 때 -점수로 변환하겠습니다.
+# 그렇게 하면 가장 큰 양수 점수가 가장 작은 음수 점수가 되어 우선순위가 높아집니다.
+severity_scores = {
+    "경증": 1,
+    "중등증": 3,
+    "중증": 5,
+    "응급": 10,
+    "매우_응급": 20 # 더 높은 응급도 추가
+}
 
+# ✨ 우선순위 큐 클래스 (재정의 또는 확인) ✨
+import heapq
+
+class PriorityQueue:
+    def __init__(self):
+        self.heap = [] # (우선순위 점수, 고유 ID, 환자 정보) 튜플 저장
+        self.counter = 0 # 동일 우선순위 처리 위한 고유 ID 카운터
+
+    def insert(self, patient_info, priority_score):
+        # Nominatim처럼 API 요청이 아니므로 user_agent는 필요 없음
+        # heapq는 기본적으로 최소 힙이므로, 높은 응급도를 높은 숫자로 정의했다면
+        # 음수로 변환하여 저장하면 가장 높은 응급도(큰 양수)가 가장 작은 음수가 되어 최상위로 옴
+        adjusted_score = -priority_score
+        entry = [adjusted_score, self.counter, patient_info]
+        heapq.heappush(self.heap, entry)
+        self.counter += 1
+        st.session_state.get('patient_queue_history', []).append(patient_info['이름']) # 히스토리 기록용
+
+    def get_highest_priority_patient(self):
+        if not self.heap:
+            return None  # 큐가 비어있으면 None 반환
+        adjusted_score, _, patient_info = heapq.heappop(self.heap)
+        # 원래의 양수 점수로 변환하여 반환
+        original_score = -adjusted_score
+        return patient_info, original_score
+
+    def is_empty(self):
+        return not bool(self.heap)
+
+    def peek(self):
+        if not self.heap:
+            return None
+        adjusted_score, _, patient_info = self.heap[0]
+        original_score = -adjusted_score
+        return patient_info, original_score
+        
+    def get_all_patients_sorted(self):
+        # 현재 힙의 모든 항목을 복사하여 정렬된 형태로 반환 (실제 힙 변경 없음)
+        temp_heap = sorted(self.heap) # (음수 점수 기준으로 정렬)
+        sorted_patients = []
+        for adjusted_score, _, patient_info in temp_heap:
+            sorted_patients.append({
+                '이름': patient_info.get('이름', '알 수 없음'),
+                '중증도': patient_info.get('중증도', '알 수 없음'),
+                '응급도 점수': -adjusted_score
+            })
+        return sorted_patients
+
+# Streamlit session_state에 우선순위 큐 인스턴스 저장
+if 'priority_queue' not in st.session_state:
+    st.session_state.priority_queue = PriorityQueue()
+if 'patient_queue_history' not in st.session_state:
+    st.session_state.patient_queue_history = []
 # -------------------------------
 # 데이터 로드 및 전처리
 # -------------------------------
@@ -360,20 +426,99 @@ else:
 
 
 # -------------------------------
-# 5️⃣ 우선순위 큐 시뮬레이션
+# 5️⃣ 응급 대기 시뮬레이션 (간이 진단서 기반)
 # -------------------------------
-st.subheader("5️⃣ 응급 대기 시뮬레이션 (스택/큐 모델)")
-mode = st.radio("대기 방식 선택", ['큐 (선입선출)', '스택 (후입선출)'])
-patient_input = st.text_input("환자 이름 (쉼표로 구분)", "홍길동,김영희,이철수")
-patients = [p.strip() for p in patient_input.split(',') if p.strip()]
+st.subheader("5️⃣ 응급환자 진단 및 대기열 관리 시뮬레이션")
 
-if patients:
-    st.write("**진료 순서:**")
-    if mode == '큐 (선입선출)':
-        queue = deque(patients)
-        st.write(list(queue))
-    else:
-        st.write(list(reversed(patients)))
+# 진단서 작성 섹션
+with st.expander("📝 환자 진단서 작성", expanded=True):
+    st.write("환자의 상태를 입력하여 응급도를 평가합니다.")
+
+    patient_name = st.text_input("환자 이름", value="")
+
+    # 중증도 판단 질문들
+    q1 = st.selectbox("1. 의식 상태", ["명료", "기면 (졸림)", "혼미 (자극에 반응)", "혼수 (자극에 무반응)"])
+    q2 = st.selectbox("2. 호흡 곤란 여부", ["없음", "가벼운 곤란", "중간 곤란", "심한 곤란"])
+    q3 = st.selectbox("3. 주요 통증/출혈 정도", ["없음", "경미", "중간", "심함"])
+    q4 = st.selectbox("4. 외상 여부", ["없음", "찰과상/멍", "열상/골절 의심", "다발성 외상/심각한 출혈"])
+
+    submit_diagnosis = st.button("진단 완료 및 큐에 추가")
+
+    if submit_diagnosis and patient_name:
+        # 응급도 점수 계산 로직
+        current_priority_score = 0
+        current_severity_level = "경증" # 기본값
+
+        # 각 질문 답변에 따른 점수 부여
+        # 점수 체계는 임의로 설정. 필요시 더 정교하게 만들 수 있음.
+        if q1 == "기면 (졸림)": current_priority_score += 3
+        elif q1 == "혼미 (자극에 반응)": current_priority_score += 7
+        elif q1 == "혼수 (자극에 무반응)": current_priority_score += 15
+
+        if q2 == "가벼운 곤란": current_priority_score += 4
+        elif q2 == "중간 곤란": current_priority_score += 9
+        elif q2 == "심한 곤란": current_priority_score += 20
+
+        if q3 == "경미": current_priority_score += 2
+        elif q3 == "중간": current_priority_score += 6
+        elif q3 == "심함": current_priority_score += 12
+
+        if q4 == "찰과상/멍": current_priority_score += 3
+        elif q4 == "열상/골절 의심": current_priority_score += 8
+        elif q4 == "다발성 외상/심각한 출혈": current_priority_score += 18
+        
+        # 총점에 따라 중증도 레벨 결정 (임의 기준)
+        if current_priority_score >= 35:
+            current_severity_level = "매우_응급"
+        elif current_priority_score >= 20:
+            current_severity_level = "응급"
+        elif current_priority_score >= 10:
+            current_severity_level = "중증"
+        elif current_priority_score >= 3:
+            current_severity_level = "중등증"
+        else:
+            current_severity_level = "경증"
+
+        # 최종 응급도 점수: 정의된 severity_scores에서 가져옴 (총점 대신)
+        final_priority_score = severity_scores.get(current_severity_level, 1) # 기본값은 경증 점수
+
+        patient_info = {
+            "이름": patient_name,
+            "중증도": current_severity_level,
+            "의식 상태": q1,
+            "호흡 곤란": q2,
+            "통증/출혈": q3,
+            "외상": q4,
+            "계산된 점수": final_priority_score # 우선순위 큐에 들어갈 최종 점수
+        }
+        
+        st.session_state.priority_queue.insert(patient_info, final_priority_score)
+        st.success(f"'{patient_name}' 환자가 '{current_severity_level}' (점수: {final_priority_score}) 상태로 큐에 추가되었습니다.")
+    elif submit_diagnosis and not patient_name:
+        st.warning("환자 이름을 입력해주세요.")
+
+# 대기열 현황 및 진료 섹션
+st.markdown("#### 🏥 현재 응급 대기열 현황")
+
+if not st.session_state.priority_queue.is_empty():
+    st.dataframe(pd.DataFrame(st.session_state.priority_queue.get_all_patients_sorted()))
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        process_patient = st.button("환자 진료 시작 (가장 응급한 환자)")
+        if process_patient:
+            processed_patient, score = st.session_state.priority_queue.get_highest_priority_patient()
+            st.info(f"**{processed_patient['이름']}** 환자 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
+            # 필요하다면 진료 시작된 환자를 다른 리스트로 옮기는 로직 추가 가능
+            st.rerun() # UI 업데이트를 위해 다시 실행
+    with col2:
+        st.write("---") # UI 구분선
+        st.write("선입선출, 후입선출 방식은 동일 중증도 내에서 적용됩니다.")
+        # 이 부분은 아직 직접 구현되지 않았으므로, 텍스트로 안내
+        # 구현하려면 PriorityQueue의 내부 로직을 수정하거나,
+        # get_all_patients_sorted() 에서 secondary sort를 구현해야 함.
+else:
+    st.info("현재 응급 대기 환자가 없습니다.")
 
 st.markdown("---")
 st.caption("ⓒ 2025 스마트 응급의료 데이터 분석 프로젝트 - SDG 3.8 보건서비스 접근성 개선")
