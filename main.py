@@ -133,12 +133,6 @@ def load_month_data(path):
 def load_road_network_from_osmnx(place_name):
     try:
         G = ox.graph_from_place(place_name, network_type='drive', simplify=True, retain_all=True)
-        # 간선에 'length' 속성이 있는지 확인하고 없으면 추가 (대부분의 OSMnx 그래프에는 기본적으로 있음)
-        # for u, v, k, data in G.edges(keys=True):
-        #     if 'length' not in data:
-        #         # 실제 길이를 계산하여 추가 (필요시)
-        #         # G.edges[u,v,k]['length'] = ox.distance.great_circle_vec(G.nodes[u]['y'], G.nodes[u]['x'], G.nodes[v]['y'], G.nodes[v]['x'])
-        #         pass # 여기서는 'length'가 있다고 가정
         st.success(f"'{place_name}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
         return G
 
@@ -169,7 +163,7 @@ def geocode_address(address, user_agent="emergency_app"):
         return None, None
 
 # -------------------------------
-# 최단 경로 탐색 함수
+# 최단 경로 탐색 및 시각화 함수
 # -------------------------------
 def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
     if graph is None:
@@ -177,7 +171,7 @@ def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
         return None, None
 
     try:
-        # 가장 가까운 노드 찾기 (경도, 위도 순서 유의)
+        # 출발/도착 지점에 가장 가까운 도로망 노드 찾기 (경도, 위도 순서 유의)
         origin_node = ox.distance.nearest_nodes(graph, start_lon, start_lat)
         destination_node = ox.distance.nearest_nodes(graph, end_lon, end_lat)
 
@@ -190,10 +184,27 @@ def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
         st.success(f"경로 탐색 완료! 총 길이: {route_length:.2f} 미터")
 
         # 경로 시각화
-        fig, ax = ox.plot_graph_route(graph, route, route_color='r', route_linewidth=5,
-                                      node_size=0, bgcolor='w', show=False, close=False)
+        # orig_dest_points: (위도, 경도) 리스트. 지도에 점을 찍어줌.
+        # orig_dest_node_color, orig_dest_node_size: 시작/도착 노드의 색상 및 크기
+        # node_color: 모든 노드의 기본 색상
+        # node_size: 모든 노드의 기본 크기 (0으로 설정하여 경로 노드만 보이게 하고 시작/도착 노드는 별도로 강조)
+        fig, ax = ox.plot_graph_route(graph, route,
+                                      route_color='r', route_linewidth=5,
+                                      node_size=0, # 모든 노드 기본 크기를 0으로
+                                      bgcolor='w', show=False, close=False,
+                                      orig_dest_points=[(start_lat, start_lon), (end_lat, end_lon)],
+                                      orig_dest_node_color=['blue', 'green'], # 출발지 파란색, 도착지 초록색
+                                      orig_dest_node_size=150, # 출발/도착 노드 크기 키우기
+                                      orig_dest_node_alpha=0.9 # 투명도
+                                     )
+
+        # 출발/도착 노드도 따로 표시 (기존 노드 시각화 위로 덮어씌우는 효과)
+        # 이미 orig_dest_node_color/size로 충분히 강조되지만, 추가적인 조절이 필요할 경우 활용
+        # ax.scatter(graph.nodes[origin_node]['x'], graph.nodes[origin_node]['y'], c='darkblue', s=200, marker='o', zorder=5, label='출발 노드')
+        # ax.scatter(graph.nodes[destination_node]['x'], graph.nodes[destination_node]['y'], c='darkgreen', s=200, marker='X', zorder=5, label='도착 노드')
+
         st.pyplot(fig)
-        st.caption(f"빨간색 선은 최단 경로를 나타냅니다. 총 길이: {route_length:.2f} 미터")
+        st.caption(f"빨간색 선은 최단 경로를 나타내며, 파란색 점은 출발지, 초록색 점은 아주대병원을 나타냅니다. 총 길이: {route_length:.2f} 미터")
         return route, route_length
 
     except nx.NetworkXNoPath:
@@ -323,32 +334,6 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
 
     transport_df['시도명'] = transport_df['소재지전체주소'].apply(extract_sido)
 
-    # '소재지전체주소'를 이용해 위도, 경도 컬럼 생성
-    # st.info("구급차 이송 데이터의 주소를 위도/경도로 변환 중입니다. (시간이 다소 소요될 수 있습니다.)")
-    # progress_bar = st.progress(0)
-    #
-    # latitudes = []
-    # longitudes = []
-    # total_addresses = len(transport_df)
-    #
-    # for i, address in enumerate(transport_df['소재지전체주소']):
-    #     lat, lon = geocode_address(address)
-    #     latitudes.append(lat)
-    #     longitudes.append(lon)
-    #     progress_bar.progress((i + 1) / total_addresses)
-    #
-    # transport_df['출발_위도'] = latitudes
-    # transport_df['출발_경도'] = longitudes
-    #
-    # progress_bar.empty()
-    # st.success("주소 지오코딩이 완료되었습니다.")
-    # transport_df.dropna(subset=['출발_위도', '출발_경도'], inplace=True)
-    # st.info(f"유효한 좌표가 없는 {total_addresses - len(transport_df)}개의 이송 기록이 제거되었습니다.")
-    #
-    # 참고: 위에 주석 처리된 지오코딩 부분은 너무 오래 걸리므로, 실제 실행 시에는 transport_df에 이미 위도/경도 컬럼이 있다고 가정하거나,
-    # 필요시 특정 샘플 데이터에 대해서만 지오코딩을 수행하는 것이 좋습니다.
-    # 여기서는 시뮬레이션 목적상 임의의 출발지 좌표를 활용할 것이므로, transport_df의 지오코딩은 일단 주석 처리된 상태로 유지합니다.
-
     transport_df.dropna(subset=['시도명'], inplace=True)
     st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
 elif not transport_df.empty:
@@ -362,6 +347,21 @@ place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea"
 road_graph = load_road_network_from_osmnx(place_for_osmnx)
 if road_graph:
     st.session_state.road_graph = road_graph # 세션 상태에 그래프 저장
+
+# 용인시 바운딩 박스 정보 가져오기 (슬라이더 범위 설정용)
+# @st.cache_data를 사용하여 한번만 실행
+@st.cache_data
+def get_yongin_bounds(place_name):
+    try:
+        gdf = ox.geocode_to_gdf(place_name)
+        south, north, west, east = gdf.unary_union.bounds
+        st.success(f"용인시 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
+        return south, north, west, east
+    except Exception as e:
+        st.error(f"용인시 경계 정보를 가져오는 데 실패했습니다: {e}")
+        return 37.1, 37.3, 127.0, 127.3 # Fallback 값
+
+yongin_south, yongin_north, yongin_west, yongin_east = get_yongin_bounds(place_for_osmnx)
 
 
 # -------------------------------
@@ -481,30 +481,27 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
     st.write("환자의 상태를 입력하여 응급도를 평가합니다.")
 
     patient_name = st.text_input("환자 이름", value="")
-    # 환자 출발지 좌표 입력 (선택 사항)
-    # 실제 사용자가 지도에서 위치를 클릭하는 기능은 folium 라이브러리 연동이 필요하며,
-    # Streamlit에서 직접 지도 클릭 이벤트를 받기 어려울 수 있습니다.
-    # 여기서는 일단 사용자가 직접 위도/경도를 입력하는 형태로 구현하거나,
-    # transport_df에서 무작위 출발지를 선택하도록 하겠습니다.
 
-    # 임의의 출발지 (transport_df에서 가져오기)
-    if not transport_df.empty and '출발_위도' in transport_df.columns and '출발_경도' in transport_df.columns:
-        valid_coords_df = transport_df.dropna(subset=['출발_위도', '출발_경도'])
-        if not valid_coords_df.empty:
-            # 환자별로 다른 출발지를 부여하기 위해, 등록 시마다 임의로 하나 선택
-            random_idx = st.session_state.get('random_idx_for_patient', 0)
-            patient_start_coords_row = valid_coords_df.iloc[random_idx % len(valid_coords_df)]
-            patient_start_lat = patient_start_coords_row['출발_위도']
-            patient_start_lon = patient_start_coords_row['출발_경도']
-            st.session_state.random_idx_for_patient = (random_idx + 1) % len(valid_coords_df) # 다음 환자를 위한 인덱스 업데이트
+    # 용인시 경계를 벗어나지 않는 위도/경도 슬라이더 추가
+    st.markdown("##### 📍 환자 출발지 좌표 입력 (용인시 경계 내)")
+    patient_start_lat = st.slider(
+        '출발지 위도',
+        min_value=yongin_south,
+        max_value=yongin_north,
+        value=(yongin_south + yongin_north) / 2, # 기본값은 중앙
+        step=0.0001, # 소수점 4자리까지 조절 가능하도록
+        format="%.4f"
+    )
+    patient_start_lon = st.slider(
+        '출발지 경도',
+        min_value=yongin_west,
+        max_value=yongin_east,
+        value=(yongin_west + yongin_east) / 2, # 기본값은 중앙
+        step=0.0001,
+        format="%.4f"
+    )
+    st.info(f"선택된 출발지: 위도 {patient_start_lat:.4f}, 경도 {patient_start_lon:.4f}")
 
-            st.info(f"환자 출발지 (임의 선택된 데이터): 위도 {patient_start_lat:.4f}, 경도 {patient_start_lon:.4f}")
-        else:
-            patient_start_lat, patient_start_lon = None, None
-            st.warning("이송 데이터에 유효한 출발지 좌표가 없어 임의의 출발지를 사용할 수 없습니다.")
-    else:
-        patient_start_lat, patient_start_lon = None, None
-        st.warning("이송 데이터에 '출발_위도' 또는 '출발_경도' 컬럼이 없어 임의의 출발지를 가져올 수 없습니다.")
 
     q1 = st.selectbox("1. 의식 상태", ["명료", "기면 (졸림)", "혼미 (자극에 반응)", "혼수 (자극에 무반응)"])
     q2 = st.selectbox("2. 호흡 곤란 여부", ["없음", "가벼운 곤란", "중간 곤란", "심한 곤란"])
@@ -557,8 +554,8 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
             "통증/출혈": q3,
             "외상": q4,
             "계산된 점수": final_priority_score,
-            "출발_위도": patient_start_lat, # 환자 출발지 좌표 저장
-            "출발_경도": patient_start_lon  # 환자 출발지 좌표 저장
+            "출발_위도": patient_start_lat, # 슬라이더에서 입력받은 좌표 저장
+            "출발_경도": patient_start_lon  # 슬라이더에서 입력받은 좌표 저장
         }
 
         # 큐 타입(mode)을 insert 함수에 전달
@@ -628,10 +625,10 @@ if st.session_state.current_patient_in_treatment and st.session_state.current_pa
     patient_lat, patient_lon = st.session_state.current_patient_coords
 
     if patient_lat is not None and patient_lon is not None:
-        st.markdown(f"**진료 중인 환자 출발지:** 위도 {patient_lat:.4f}, 경도 {patient_lon:.4f}")
-        st.markdown(f"**아주대병원 도착지:** 위도 {AJOU_HOSPITAL_COORDS[0]:.4f}, 경도 {AJOU_HOSPITAL_COORDS[1]:.4f}")
+        st.markdown(f"**환자 출발지:** 위도 {patient_lat:.4f}, 경도 {patient_lon:.4f} (파란색 점)")
+        st.markdown(f"**아주대병원 도착지:** 위도 {AJOU_HOSPITAL_COORDS[0]:.4f}, 경도 {AJOU_HOSPITAL_COORDS[1]:.4f} (초록색 점)")
 
-        if st.button("🚑 아주대병원 최단 경로 확인"):
+        if st.button("🚑 최단 경로 확인"):
             if 'road_graph' in st.session_state and st.session_state.road_graph:
                 find_shortest_route_and_plot(st.session_state.road_graph,
                                              patient_lat, patient_lon,
@@ -639,19 +636,7 @@ if st.session_state.current_patient_in_treatment and st.session_state.current_pa
             else:
                 st.warning("도로망 그래프가 로드되지 않았습니다. '4️⃣ 도로망 그래프 정보' 섹션을 확인해주세요.")
     else:
-        st.warning("현재 진료 중인 환자의 출발지 좌표를 찾을 수 없습니다. (이송 데이터에 좌표가 없는 경우)")
-        st.info("이송 데이터 로드 시 주소 지오코딩이 제대로 이루어지지 않았을 수 있습니다. 또는, 시뮬레이션 목적으로 무작위 좌표를 사용할 수 있습니다.")
-
-        # 임시로 용인시청을 출발지로 사용 (환자 출발지 좌표가 없는 경우)
-        if st.button("🏥 용인시청에서 아주대병원 최단 경로 확인 (임시 출발지)"):
-            yongin_city_hall_coords = (37.241079, 127.179633) # 용인시청 위도, 경도
-            st.info(f"임시 출발지 (용인시청): 위도 {yongin_city_hall_coords[0]:.4f}, 경도 {yongin_city_hall_coords[1]:.4f}")
-            if 'road_graph' in st.session_state and st.session_state.road_graph:
-                find_shortest_route_and_plot(st.session_state.road_graph,
-                                             yongin_city_hall_coords[0], yongin_city_hall_coords[1],
-                                             AJOU_HOSPITAL_COORDS[0], AJOU_HOSPITAL_COORDS[1])
-            else:
-                st.warning("도로망 그래프가 로드되지 않았습니다. '4️⃣ 도로망 그래프 정보' 섹션을 확인해주세요.")
+        st.warning("현재 진료 중인 환자의 출발지 좌표를 찾을 수 없습니다. 다시 환자 진단서를 작성하여 좌표를 입력해주세요.")
 
 else:
     st.info("진료를 시작한 환자가 없거나, 환자 정보에 출발지 좌표가 없습니다. 먼저 환자를 진단하고 진료를 시작해주세요.")
