@@ -329,34 +329,34 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
     transport_df.dropna(subset=['시도명'], inplace=True)
     st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
 elif not transport_df.empty:
-    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뜁니다.")
+    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뛰니다.")
 
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
 
 # Road network는 용인시와 수원시를 함께 로드
-# place_for_osmnx = "Yongin-si, Gyeonggi-do, South Korea" # 단일 지역에서
-place_for_osmnx = ["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"] # 두 지역 로드로 변경
+place_for_osmnx = ["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"]
 
 road_graph = load_road_network_from_osmnx(place_for_osmnx) # 리스트를 인자로 전달
 if road_graph:
     st.session_state.road_graph = road_graph # 세션 상태에 그래프 저장
 
-# 용인시 바운딩 박스 정보 가져오기 (슬라이더 범위 설정용)
-# @st.cache_data를 사용하여 한번만 실행
+# 용인시와 수원시를 포함하는 바운딩 박스 정보 가져오기 (슬라이더 범위 설정용)
 @st.cache_data
-def get_yongin_bounds(place_name_for_bounds): # 단일 지역의 바운딩 박스만 가져옴 (환자 출발지는 용인시로 제한하기 위함)
+def get_combined_bounds(place_names_for_bounds): # 인자를 리스트로 받음
     try:
-        gdf = ox.geocode_to_gdf(place_name_for_bounds)
+        # 여러 지역의 지오메트리를 합쳐서 바운딩 박스를 계산
+        gdf = ox.geocode_to_gdf(place_names_for_bounds)
         south, north, west, east = gdf.unary_union.bounds
-        st.success(f"환자 출발지 (용인시) 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
+        st.success(f"환자 출발지 (선택 지역) 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
         return south, north, west, east
     except Exception as e:
-        st.error(f"용인시 경계 정보를 가져오는 데 실패했습니다: {e}")
-        return 37.1, 37.3, 127.0, 127.3 # Fallback 값 (경기도 용인시 근처)
+        st.error(f"지정된 지역의 경계 정보를 가져오는 데 실패했습니다: {e}")
+        # 수원/용인 근처의 더 넓은 fallback 값 (더 넓은 범위로 조정)
+        return 37.0, 37.5, 126.9, 127.4
 
-# 슬라이더는 환자의 출발지를 용인시로 제한하므로, 용인시의 바운딩 박스만 가져옵니다.
-yongin_south, yongin_north, yongin_west, yongin_east = get_yongin_bounds("Yongin-si, Gyeonggi-do, South Korea")
+# 슬라이더는 환자의 출발지를 용인시와 수원시로 제한하므로, 이 두 지역의 바운딩 박스를 가져옵니다.
+combined_south, combined_north, combined_west, combined_east = get_combined_bounds(["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"])
 
 
 # -------------------------------
@@ -477,21 +477,21 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
 
     patient_name = st.text_input("환자 이름", value="")
 
-    # 용인시 경계를 벗어나지 않는 위도/경도 슬라이더 추가
-    st.markdown("##### 📍 환자 출발지 좌표 입력 (용인시 경계 내)")
+    # 용인시와 수원시 경계를 벗어나지 않는 위도/경도 슬라이더 추가
+    st.markdown("##### 📍 환자 출발지 좌표 입력 (용인시 및 수원시 경계 내)") # 설명 문구 변경
     patient_start_lat = st.slider(
         '출발지 위도',
-        min_value=yongin_south,
-        max_value=yongin_north,
-        value=(yongin_south + yongin_north) / 2, # 기본값은 중앙
+        min_value=combined_south, # 변경된 변수 사용
+        max_value=combined_north, # 변경된 변수 사용
+        value=(combined_south + combined_north) / 2, # 기본값은 중앙
         step=0.0001, # 소수점 4자리까지 조절 가능하도록
         format="%.4f"
     )
     patient_start_lon = st.slider(
         '출발지 경도',
-        min_value=yongin_west,
-        max_value=yongin_east,
-        value=(yongin_west + yongin_east) / 2, # 기본값은 중앙
+        min_value=combined_west, # 변경된 변수 사용
+        max_value=combined_east, # 변경된 변수 사용
+        value=(combined_west + combined_east) / 2, # 기본값은 중앙
         step=0.0001,
         format="%.4f"
     )
