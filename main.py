@@ -8,11 +8,11 @@ import os
 import chardet
 import heapq
 
-# 공간 데이터 및 그래프 처리를 위한 라이브러리
-import networkx as nx
-import osmnx as ox
-from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
+# 공간 데이터 및 그래프 처리를 위한 라이브러리는 더 이상 사용하지 않으므로 주석 처리하거나 삭제합니다.
+# import networkx as nx
+# import osmnx as ox
+# from geopy.geocoders import Nominatim
+# from geopy.extra.rate_limiter import RateLimiter
 
 # Matplotlib 한글 폰트 설정
 plt.rcParams['font.family'] = 'Malgun Gothic' # Windows 사용자
@@ -128,83 +128,36 @@ def load_month_data(path):
         st.error(f"'{path}' JSON 파일을 로드하는 중 오류 발생: {e}")
         return pd.DataFrame()
 
-# osmnx를 사용하여 도로망 그래프를 로드하고 networkx 그래프로 반환하는 함수
-@st.cache_data(show_spinner="도로망 데이터를 OpenStreetMap에서 가져오는 중입니다...")
-def load_road_network_from_osmnx(place_names): # place_names를 리스트로 받음
-    try:
-        # ox.graph_from_places를 사용하여 여러 지역의 도로망을 한 번에 로드
-        G = ox.graph_from_places(place_names, network_type='drive', simplify=True, retain_all=True)
-        st.success(f"'{place_names}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
-        return G
+# 좌표 관련 함수 및 로직은 모두 삭제됩니다.
+# @st.cache_data(show_spinner="도로망 데이터를 OpenStreetMap에서 가져오는 중입니다...")
+# def load_road_network_from_osmnx(place_names):
+#     try:
+#         G = ox.graph_from_places(place_names, network_type='drive', simplify=True, retain_all=True)
+#         st.success(f"'{place_names}' 도로망을 NetworkX 그래프로 변환했습니다. 노드 수: {G.number_of_nodes()}, 간선 수: {G.number_of_edges()}")
+#         return G
+#     except Exception as e:
+#         st.error(f"'{place_names}' 도로망 데이터를 OpenStreetMap에서 가져오고 그래프로 변환하는 중 오류 발생: {e}")
+#         st.warning("네트워크 연결을 확인하거나, 지역 이름이 정확한지 확인해주세요. 너무 큰 지역을 지정하면 메모리 부족이나 타임아웃이 발생할 수 있습니다.")
+#         return None
 
-    except Exception as e:
-        st.error(f"'{place_names}' 도로망 데이터를 OpenStreetMap에서 가져오고 그래프로 변환하는 중 오류 발생: {e}")
-        st.warning("네트워크 연결을 확인하거나, 지역 이름이 정확한지 확인해주세요. 너무 큰 지역을 지정하면 메모리 부족이나 타임아웃이 발생할 수 있습니다.")
-        return None
+# @st.cache_data
+# def geocode_address(address, user_agent="emergency_app"):
+#     geolocator = Nominatim(user_agent=user_agent)
+#     geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
+#     try:
+#         if pd.isna(address) or not isinstance(address, str) or not address.strip():
+#             return None, None
+#         location = geocode(address)
+#         if location:
+#             return location.latitude, location.longitude
+#         else:
+#             return None, None
+#     except Exception as e:
+#         return None, None
 
-# Geopy를 이용한 주소 지오코딩 함수
-@st.cache_data
-def geocode_address(address, user_agent="emergency_app"):
-    geolocator = Nominatim(user_agent=user_agent)
-    # Nominatim 정책에 따라 요청 간 최소 1초 지연 권장
-    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
-
-    try:
-        if pd.isna(address) or not isinstance(address, str) or not address.strip():
-            return None, None # 유효하지 않은 주소는 None 반환
-
-        location = geocode(address)
-        if location:
-            return location.latitude, location.longitude
-        else:
-            return None, None
-    except Exception as e:
-        # 지오코딩 실패 시 오류 메시지 출력 (디버깅용, 실제 앱에서는 주석 처리 권장)
-        # st.warning(f"주소 '{address}' 지오코딩 실패: {e}")
-        return None, None
-
-# -------------------------------
-# 최단 경로 탐색 및 시각화 함수
-# -------------------------------
-def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
-    if graph is None:
-        st.error("도로망 그래프가 로드되지 않았습니다. 경로를 탐색할 수 없습니다.")
-        return None, None
-
-    try:
-        # 출발/도착 지점에 가장 가까운 도로망 노드 찾기 (경도, 위도 순서 유의)
-        origin_node = ox.distance.nearest_nodes(graph, start_lon, start_lat)
-        destination_node = ox.distance.nearest_nodes(graph, end_lon, end_lat)
-
-        # 최단 경로 계산 (weight는 'length'로 기본 설정)
-        route = nx.shortest_path(graph, origin_node, destination_node, weight='length')
-
-        # 경로 길이 계산 (미터 단위)
-        route_length = sum(ox.utils_graph.get_route_edge_attributes(graph, route, 'length'))
-
-        st.success(f"경로 탐색 완료! 총 길이: {route_length:.2f} 미터")
-
-        # 경로 시각화
-        fig, ax = ox.plot_graph_route(graph, route,
-                                      route_color='r', route_linewidth=5,
-                                      node_size=0, # 모든 노드 기본 크기를 0으로
-                                      bgcolor='w', show=False, close=False,
-                                      orig_dest_points=[(start_lat, start_lon), (end_lat, end_lon)],
-                                      orig_dest_node_color=['blue', 'green'], # 출발지 파란색, 도착지 초록색
-                                      orig_dest_node_size=150, # 출발/도착 노드 크기 키우기
-                                      orig_dest_node_alpha=0.9 # 투명도
-                                     )
-
-        st.pyplot(fig)
-        st.caption(f"빨간색 선은 최단 경로를 나타내며, 파란색 점은 출발지, 초록색 점은 아주대병원을 나타냅니다. 총 길이: {route_length:.2f} 미터")
-        return route, route_length
-
-    except nx.NetworkXNoPath:
-        st.error("지정된 시작점과 도착점 사이에 경로를 찾을 수 없습니다. (경로가 단절되었거나, 선택한 좌표가 도로에서 너무 멀리 떨어져 있거나, 병원 위치가 로드된 지도 범위를 벗어났을 수 있습니다.)")
-        return None, None
-    except Exception as e:
-        st.error(f"경로 탐색 중 오류 발생: {e}")
-        return None, None
+# def find_shortest_route_and_plot(graph, start_lat, start_lon, end_lat, end_lon):
+#     # 이 함수는 이제 사용하지 않으므로 삭제됩니다.
+#     pass
 
 
 # -------------------------------
@@ -280,8 +233,9 @@ if 'priority_queue' not in st.session_state:
     st.session_state.priority_queue = PriorityQueue()
 if 'current_patient_in_treatment' not in st.session_state:
     st.session_state.current_patient_in_treatment = None
-if 'current_patient_coords' not in st.session_state:
-    st.session_state.current_patient_coords = None # 현재 진료중인 환자의 출발지 좌표 저장
+# 좌표 관련 session_state는 삭제합니다.
+# if 'current_patient_coords' not in st.session_state:
+#     st.session_state.current_patient_coords = None # 현재 진료중인 환자의 출발지 좌표 저장
 
 # -------------------------------
 # 데이터 로드 및 전처리
@@ -305,7 +259,7 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
             return '세종특별자치시'
 
         korean_sido_list = ["서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
-                                 "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도", # 강원도 -> 강원특별자치도
+                                 "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원특별자치도",
                                  "충청북도", "충청남도", "전라북도", "전라남도", "경상북도", "경상남도",
                                  "제주특별자치도"]
 
@@ -315,13 +269,11 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
 
         for part in parts:
             if isinstance(part, str) and ('특별시' in part or '광역시' in part or '자치시' in part or '자치도' in part):
-                # '강원특별자치도' 등 긴 이름 처리
                 if '강원' in part or '전라' in part or '충청' in part or '경상' in part or '경기' in part or '제주' in part:
-                    # 두 단어 이상으로 된 시도명 (예: 강원특별자치도) 처리
-                    if len(parts) > 1 and f"{parts[0]}{part}" in korean_sido_list: # 첫 단어와 결합하여 검사
+                    if len(parts) > 1 and f"{parts[0]}{part}" in korean_sido_list:
                         return f"{parts[0]}{part}"
-                    return part # 단일 단어 시도명 (예: 강원도)
-                return part # 서울특별시, 부산광역시 등
+                    return part
+                return part
         return None
 
     transport_df['시도명'] = transport_df['소재지전체주소'].apply(extract_sido)
@@ -329,34 +281,29 @@ if not transport_df.empty and '소재지전체주소' in transport_df.columns:
     transport_df.dropna(subset=['시도명'], inplace=True)
     st.info("'소재지전체주소' 컬럼을 기반으로 '시도명' 컬럼을 생성하고 보정했습니다.")
 elif not transport_df.empty:
-    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뛰니다.")
+    st.warning("'transport_df'에 '소재지전체주소' 컬럼이 없습니다. '시도명' 생성을 건너뜁니다.")
 
 time_df = load_time_data(time_json_path)
 month_df = load_month_data(month_json_path)
 
-# Road network는 용인시와 수원시를 함께 로드
-place_for_osmnx = ["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"]
+# 도로망 관련 로딩 및 바운딩 박스 관련 코드는 삭제됩니다.
+# place_for_osmnx = ["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"]
+# road_graph = load_road_network_from_osmnx(place_for_osmnx)
+# if road_graph:
+#     st.session_state.road_graph = road_graph
 
-road_graph = load_road_network_from_osmnx(place_for_osmnx) # 리스트를 인자로 전달
-if road_graph:
-    st.session_state.road_graph = road_graph # 세션 상태에 그래프 저장
+# @st.cache_data
+# def get_combined_bounds(place_names_for_bounds):
+#     try:
+#         gdf = ox.geocode_to_gdf(place_names_for_bounds)
+#         south, north, west, east = gdf.unary_union.bounds
+#         st.success(f"환자 출발지 (선택 지역) 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
+#         return south, north, west, east
+#     except Exception as e:
+#         st.error(f"지정된 지역의 경계 정보를 가져오는 데 실패했습니다: {e}")
+#         return 37.0, 37.5, 126.9, 127.4
 
-# 용인시와 수원시를 포함하는 바운딩 박스 정보 가져오기 (슬라이더 범위 설정용)
-@st.cache_data
-def get_combined_bounds(place_names_for_bounds): # 인자를 리스트로 받음
-    try:
-        # 여러 지역의 지오메트리를 합쳐서 바운딩 박스를 계산
-        gdf = ox.geocode_to_gdf(place_names_for_bounds)
-        south, north, west, east = gdf.unary_union.bounds
-        st.success(f"환자 출발지 (선택 지역) 경계: 위도 ({south:.4f} ~ {north:.4f}), 경도 ({west:.4f} ~ {east:.4f})")
-        return south, north, west, east
-    except Exception as e:
-        st.error(f"지정된 지역의 경계 정보를 가져오는 데 실패했습니다: {e}")
-        # 수원/용인 근처의 더 넓은 fallback 값 (더 넓은 범위로 조정)
-        return 37.0, 37.5, 126.9, 127.4
-
-# 슬라이더는 환자의 출발지를 용인시와 수원시로 제한하므로, 이 두 지역의 바운딩 박스를 가져옵니다.
-combined_south, combined_north, combined_west, combined_east = get_combined_bounds(["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"])
+# combined_south, combined_north, combined_west, combined_east = get_combined_bounds(["Yongin-si, Gyeonggi-do, South Korea", "Suwon-si, Gyeonggi-do, South Korea"])
 
 
 # -------------------------------
@@ -445,21 +392,21 @@ else:
 
 
 # -------------------------------
-# 4️⃣ 도로망 그래프 정보
+# 4️⃣ 도로망 그래프 정보 (좌표 기능 제거로 이 섹션은 이제 의미가 없으므로 제거하거나 제목을 변경할 수 있습니다.)
+# 여기서는 완전히 제거합니다.
 # -------------------------------
-st.subheader("🛣️ 도로망 그래프 정보")
-if road_graph:
-    st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**") # 변경된 place_for_osmnx 출력
-    st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
-    st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
+# st.subheader("🛣️ 도로망 그래프 정보")
+# if road_graph:
+#     st.write(f"**로드된 도로망 그래프 (`{place_for_osmnx}`):**")
+#     st.write(f"  - 노드 수: {road_graph.number_of_nodes()}개")
+#     st.write(f"  - 간선 수: {road_graph.number_of_edges()}개")
 
-    st.write("간단한 도로망 지도 시각화 (노드와 간선):")
-    fig, ax = ox.plot_graph(road_graph, show=False, bgcolor='white', node_color='red', node_size=5, edge_color='gray', edge_linewidth=0.5)
-    st.pyplot(fig)
-    st.caption("참고: 전체 도로망은 복잡하여 로딩이 느릴 수 있습니다.")
-
-else:
-    st.warning("도로망 그래프 로드에 실패했습니다. 지정된 지역을 확인해주세요.")
+#     st.write("간단한 도로망 지도 시각화 (노드와 간선):")
+#     fig, ax = ox.plot_graph(road_graph, show=False, bgcolor='white', node_color='red', node_size=5, edge_color='gray', edge_linewidth=0.5)
+#     st.pyplot(fig)
+#     st.caption("참고: 전체 도로망은 복잡하여 로딩이 느릴 수 있습니다.")
+# else:
+#     st.warning("도로망 그래프 로드에 실패했습니다. 지정된 지역을 확인해주세요.")
 
 
 # -------------------------------
@@ -477,25 +424,25 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
 
     patient_name = st.text_input("환자 이름", value="")
 
-    # 용인시와 수원시 경계를 벗어나지 않는 위도/경도 슬라이더 추가
-    st.markdown("##### 📍 환자 출발지 좌표 입력 (용인시 및 수원시 경계 내)") # 설명 문구 변경
-    patient_start_lat = st.slider(
-        '출발지 위도',
-        min_value=combined_south, # 변경된 변수 사용
-        max_value=combined_north, # 변경된 변수 사용
-        value=(combined_south + combined_north) / 2, # 기본값은 중앙
-        step=0.0001, # 소수점 4자리까지 조절 가능하도록
-        format="%.4f"
-    )
-    patient_start_lon = st.slider(
-        '출발지 경도',
-        min_value=combined_west, # 변경된 변수 사용
-        max_value=combined_east, # 변경된 변수 사용
-        value=(combined_west + combined_east) / 2, # 기본값은 중앙
-        step=0.0001,
-        format="%.4f"
-    )
-    st.info(f"선택된 출발지: 위도 {patient_start_lat:.4f}, 경도 {patient_start_lon:.4f}")
+    # 좌표 슬라이더 관련 내용은 모두 삭제됩니다.
+    # st.markdown("##### 📍 환자 출발지 좌표 입력 (용인시 및 수원시 경계 내)")
+    # patient_start_lat = st.slider(
+    #     '출발지 위도',
+    #     min_value=combined_south,
+    #     max_value=combined_north,
+    #     value=(combined_south + combined_north) / 2,
+    #     step=0.0001,
+    #     format="%.4f"
+    # )
+    # patient_start_lon = st.slider(
+    #     '출발지 경도',
+    #     min_value=combined_west,
+    #     max_value=combined_east,
+    #     value=(combined_west + combined_east) / 2,
+    #     step=0.0001,
+    #     format="%.4f"
+    # )
+    # st.info(f"선택된 출발지: 위도 {patient_start_lat:.4f}, 경도 {patient_start_lon:.4f}")
 
 
     q1 = st.selectbox("1. 의식 상태", ["명료", "기면 (졸림)", "혼미 (자극에 반응)", "혼수 (자극에 무반응)"])
@@ -549,8 +496,8 @@ with st.expander("📝 환자 진단서 작성", expanded=True):
             "통증/출혈": q3,
             "외상": q4,
             "계산된 점수": final_priority_score,
-            "출발_위도": patient_start_lat, # 슬라이더에서 입력받은 좌표 저장
-            "출발_경도": patient_start_lon  # 슬라이더에서 입력받은 좌표 저장
+            # "출발_위도": patient_start_lat, # 좌표 정보 삭제
+            # "출발_경도": patient_start_lon  # 좌표 정보 삭제
         }
 
         # 큐 타입(mode)을 insert 함수에 전달
@@ -594,11 +541,11 @@ if not st.session_state.priority_queue.is_empty():
             if processed_patient:
                 # 진료 시작된 환자 정보를 session_state에 저장
                 st.session_state.current_patient_in_treatment = processed_patient
-                st.session_state.current_patient_coords = (processed_patient.get('출발_위도'), processed_patient.get('출발_경도'))
+                # st.session_state.current_patient_coords = None # 좌표 정보 삭제
                 st.success(f"**{processed_patient['이름']}** 환자가 진료를 시작합니다. (중증도: {processed_patient['중증도']}, 점수: {score})")
             else:
                 st.session_state.current_patient_in_treatment = None # 큐가 비었으면 진료중인 환자 없음
-                st.session_state.current_patient_coords = None
+                # st.session_state.current_patient_coords = None # 좌표 정보 삭제
                 st.warning("진료할 환자가 없습니다.")
             st.rerun()
     with col2:
@@ -606,35 +553,34 @@ if not st.session_state.priority_queue.is_empty():
 else:
     st.info("현재 응급 대기 환자가 없습니다.")
     st.session_state.current_patient_in_treatment = None
-    st.session_state.current_patient_coords = None
+    # st.session_state.current_patient_coords = None # 좌표 정보 삭제
 
 # -------------------------------
-# 6️⃣ 최단 경로 시뮬레이션
+# 6️⃣ 최단 경로 시뮬레이션 (섹션 전체 삭제)
 # -------------------------------
-st.subheader("6️⃣ 응급실 최단 경로 시뮬레이션")
+# st.subheader("6️⃣ 응급실 최단 경로 시뮬레이션")
 
-# 아주대병원 좌표
-AJOU_HOSPITAL_COORDS = (37.282598, 127.043534) # 위도, 경도
+# AJOU_HOSPITAL_COORDS = (37.282598, 127.043534)
 
-if st.session_state.current_patient_in_treatment and st.session_state.current_patient_coords:
-    patient_lat, patient_lon = st.session_state.current_patient_coords
+# if st.session_state.current_patient_in_treatment and st.session_state.current_patient_coords:
+#     patient_lat, patient_lon = st.session_state.current_patient_coords
 
-    if patient_lat is not None and patient_lon is not None:
-        st.markdown(f"**환자 출발지:** 위도 {patient_lat:.4f}, 경도 {patient_lon:.4f} (파란색 점)")
-        st.markdown(f"**아주대병원 도착지:** 위도 {AJOU_HOSPITAL_COORDS[0]:.4f}, 경도 {AJOU_HOSPITAL_COORDS[1]:.4f} (초록색 점)")
+#     if patient_lat is not None and patient_lon is not None:
+#         st.markdown(f"**환자 출발지:** 위도 {patient_lat:.4f}, 경도 {patient_lon:.4f} (파란색 점)")
+#         st.markdown(f"**아주대병원 도착지:** 위도 {AJOU_HOSPITAL_COORDS[0]:.4f}, 경도 {AJOU_HOSPITAL_COORDS[1]:.4f} (초록색 점)")
 
-        if st.button("🚑 최단 경로 확인"):
-            if 'road_graph' in st.session_state and st.session_state.road_graph:
-                find_shortest_route_and_plot(st.session_state.road_graph,
-                                             patient_lat, patient_lon,
-                                             AJOU_HOSPITAL_COORDS[0], AJOU_HOSPITAL_COORDS[1])
-            else:
-                st.warning("도로망 그래프가 로드되지 않았습니다. '4️⃣ 도로망 그래프 정보' 섹션을 확인해주세요.")
-    else:
-        st.warning("현재 진료 중인 환자의 출발지 좌표를 찾을 수 없습니다. 다시 환자 진단서를 작성하여 좌표를 입력해주세요.")
+#         if st.button("🚑 최단 경로 확인"):
+#             if 'road_graph' in st.session_state and st.session_state.road_graph:
+#                 find_shortest_route_and_plot(st.session_state.road_graph,
+#                                              patient_lat, patient_lon,
+#                                              AJOU_HOSPITAL_COORDS[0], AJOU_HOSPITAL_COORDS[1])
+#             else:
+#                 st.warning("도로망 그래프가 로드되지 않았습니다. '4️⃣ 도로망 그래프 정보' 섹션을 확인해주세요.")
+#     else:
+#         st.warning("현재 진료 중인 환자의 출발지 좌표를 찾을 수 없습니다. 다시 환자 진단서를 작성하여 좌표를 입력해주세요.")
 
-else:
-    st.info("진료를 시작한 환자가 없거나, 환자 정보에 출발지 좌표가 없습니다. 먼저 환자를 진단하고 진료를 시작해주세요.")
+# else:
+#     st.info("진료를 시작한 환자가 없거나, 환자 정보에 출발지 좌표가 없습니다. 먼저 환자를 진단하고 진료를 시작해주세요.")
 
 
 st.markdown("---")
